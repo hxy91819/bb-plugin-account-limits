@@ -1,0 +1,5 @@
+[extend]
+useDefault = true
+[[allowlists]]
+description = "Generated dependencies and release bundles; source is scanned before packaging"
+paths = ['''node_modules/''', '''dist/''', '''release/''', '''\.git/''']

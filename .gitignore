@@ -1,0 +1,12 @@
+node_modules/
+dist/
+release/
+*.tgz
+*.log
+.env*
+*.local.json
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx

@@ -1,0 +1,9 @@
+{
+  "cliproxy": {
+    "managementBaseUrl": "http://127.0.0.1:8317/v0/management",
+    "managementKeyEnv": "CLIPROXY_MANAGEMENT_KEY",
+    "accounts": [
+      { "id": "work", "provider": "claude", "account": "work@example.com", "label": "Work", "poolWeight": 1 }
+    ]
+  }
+}

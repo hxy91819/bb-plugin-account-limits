@@ -1,0 +1,142 @@
+import assert from "node:assert/strict";
+import { test } from "node:test";
+import {
+  CLIPROXY_USAGE_CACHE_MAX_AGE_MS,
+  CLIPROXY_USAGE_REFRESH_CRON,
+  CLIPROXY_USAGE_REFRESH_SCHEDULE_NAME,
+  createInMemoryPanelCache,
+  createPanelSnapshotReader,
+  registerCliproxyUsageRefreshSchedule,
+} from "./server.js";
+import type { ProviderSnapshot } from "./contract.js";
+
+test("unconfigured machines are hidden and never queried even when stale quota cache exists", async () => {
+  const cache = createInMemoryPanelCache();
+  cache.replaceAll("local", cliproxySnapshot(50, 60).providers, 1);
+  let configured = false;
+  let reads = 0;
+  const reader = createPanelSnapshotReader({ cache, now: () => 1_800_000,
+    listHosts: async () => [{ id: "local", name: "local", status: "connected" }],
+    isConfigured: async () => configured,
+    readHost: async () => { reads++; return cliproxySnapshot(10, 20); },
+  });
+  assert.deepEqual(await reader({ force: true }), { machines: [] });
+  assert.equal(reads, 0);
+  assert.deepEqual(cache.read("local")?.providers, []);
+  configured = true;
+  assert.equal((await reader({})).machines.length, 1);
+  assert.equal(reads, 1);
+});
+
+test("a configured but unavailable proxy stays visible; unknown disconnected machines stay absent", async () => {
+  const reader = createPanelSnapshotReader({ cache: createInMemoryPanelCache(), now: () => 0,
+    listHosts: async () => [{ id: "configured", name: "configured", status: "connected" }, { id: "other", name: "other", status: "disconnected" }],
+    isConfigured: async () => true, readHost: async () => { throw new Error("offline"); },
+  });
+  const result = await reader({});
+  assert.equal(result.machines.length, 1);
+  assert.equal(result.machines[0]?.id, "configured");
+  assert.equal(result.machines[0]?.status, "error");
+});
+
+function cliproxySnapshot(claudeUsedPercent: number, grokUsedPercent: number): ProviderSnapshot {
+  return {
+    providers: [
+      { id: "cliproxy-claude", displayName: "Claude", accounts: [], usage: { status: "ok", planLabel: null, windows: [{ accountLabel: "Claude", label: "Weekly limit", usedPercent: claudeUsedPercent, resetsAt: null }] } },
+      { id: "cliproxy-xai", displayName: "Grok", accounts: [], usage: { status: "ok", planLabel: null, windows: [{ accountLabel: "Grok", label: "Weekly limit", usedPercent: grokUsedPercent, resetsAt: null }] } },
+    ],
+  };
+}
+
+function usedPercent(provider: ProviderSnapshot["providers"][number] | undefined): number | undefined {
+  return provider?.usage.status === "ok" ? provider.usage.windows[0]?.usedPercent : undefined;
+}
+
+test("额度面板在 30 分钟内复用缓存，过期才重新读取完整快照", async () => {
+  let now = 1_700_000_000_000;
+  const calls: Array<readonly string[] | undefined> = [];
+  const reader = createPanelSnapshotReader({
+    cache: createInMemoryPanelCache(),
+    listHosts: async () => [{ id: "host-local", name: "本机", status: "connected" }],
+    readHost: async (_hostId, providerIds) => {
+      calls.push(providerIds);
+      return cliproxySnapshot(calls.length, calls.length);
+    },
+    now: () => now,
+  });
+
+  const initial = await reader({});
+  const cached = await reader({});
+  now += CLIPROXY_USAGE_CACHE_MAX_AGE_MS;
+  const refreshed = await reader({});
+
+  assert.deepEqual(calls, [undefined, undefined]);
+  assert.equal(usedPercent(initial.machines[0]?.providers[0]), 1);
+  assert.equal(usedPercent(cached.machines[0]?.providers[0]), 1);
+  assert.equal(usedPercent(refreshed.machines[0]?.providers[0]), 2);
+});
+
+test("强制更新会绕过未过期的完整快照缓存", async () => {
+  let now = 1_700_000_000_000;
+  let calls = 0;
+  const reader = createPanelSnapshotReader({
+    cache: createInMemoryPanelCache(),
+    listHosts: async () => [{ id: "host-local", name: "本机", status: "connected" }],
+    readHost: async () => cliproxySnapshot(++calls, calls),
+    now: () => now,
+  });
+
+  await reader({});
+  now += 60_000;
+  const refreshed = await reader({ force: true });
+
+  assert.equal(calls, 2);
+  assert.equal(usedPercent(refreshed.machines[0]?.providers[0]), 2);
+});
+
+test("插件注册每 30 分钟一次的完整额度缓存刷新", async () => {
+  let scheduled: (() => void | Promise<void>) | undefined;
+  const inputs: unknown[] = [];
+  registerCliproxyUsageRefreshSchedule({
+    schedule(name, cron, fn) {
+      assert.equal(name, CLIPROXY_USAGE_REFRESH_SCHEDULE_NAME);
+      assert.equal(cron, CLIPROXY_USAGE_REFRESH_CRON);
+      scheduled = fn;
+    },
+  }, async input => { inputs.push(input); });
+
+  await scheduled?.();
+  assert.deepEqual(inputs, [{ force: true }]);
+});
+
+test("单供应商刷新只请求该供应商，并保留其余缓存数据", async () => {
+  let now = 1_700_000_000_000;
+  const calls: Array<readonly string[] | undefined> = [];
+  const reader = createPanelSnapshotReader({
+    cache: createInMemoryPanelCache(),
+    listHosts: async () => [{ id: "host-local", name: "本机", status: "connected" }],
+    readHost: async (_hostId, providerIds) => {
+      calls.push(providerIds);
+      const snapshot = cliproxySnapshot(10, 20);
+      return providerIds ? { providers: snapshot.providers.filter(provider => providerIds.includes(provider.id)).map(provider => ({
+        ...provider,
+        usage: provider.id === "cliproxy-claude" && provider.usage.status === "ok"
+          ? { ...provider.usage, windows: [{ ...provider.usage.windows[0]!, usedPercent: 30 }] }
+          : provider.usage,
+      })) } : snapshot;
+    },
+    now: () => now,
+  });
+
+  await reader({});
+  now += 60_000;
+  const refreshed = await reader({ providerIds: ["cliproxy-claude"], force: true });
+  const providers = new Map(refreshed.machines[0]?.providers.map(provider => [provider.id, provider]));
+
+  assert.deepEqual(calls, [undefined, ["cliproxy-claude"]]);
+  assert.equal(providers.size, 2);
+  assert.equal(usedPercent(providers.get("cliproxy-claude")), 30);
+  assert.equal(usedPercent(providers.get("cliproxy-xai")), 20);
+  assert.equal(providers.get("cliproxy-claude")?.updatedAt, new Date(now).toISOString());
+  assert.equal(providers.get("cliproxy-xai")?.updatedAt, new Date(now - 60_000).toISOString());
+});
