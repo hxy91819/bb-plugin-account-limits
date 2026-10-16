@@ -372,7 +372,7 @@ test("Antigravity custom quota labels remove only a whitespace-delimited remaini
 
 test("Antigravity handles long upstream quota names without blocking the host", () => {
   // Isolate the CPU-bound regression so a bad suffix matcher cannot hang the suite.
-  execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
+  execFileSync(process.execPath, ["--import=tsx", "--input-type=module", "-e", `
     import assert from "node:assert/strict";
     import { normalizeAntigravityUsage } from "./usage.ts";
     const displayName = "credits" + " ".repeat(300_000) + "unknown";
