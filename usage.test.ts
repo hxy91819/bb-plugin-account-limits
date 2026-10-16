@@ -3,6 +3,7 @@ import { test } from "node:test";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { execFileSync } from "node:child_process";
 import { cliproxyAccountsFromAuthFiles, discoveredCliproxyGroups, normalizeAntigravityUsage, normalizeClaudeUsage, normalizeCliproxyCachedUsage, normalizeCliproxyCodexUsage, normalizeGrokUsage, normalizeKimiUsage, readCliproxyProviderUsage, readCliproxyUsage } from "./usage.js";
 
 test("Claude usage converts Cliproxy's official usage response into BB windows", () => {
@@ -352,4 +353,31 @@ test("Cliproxy queries time out rather than leaving BB's usage refresh pending",
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("Antigravity custom quota labels remove only a whitespace-delimited remaining suffix", () => {
+  for (const [displayName, expected] of [
+    ["Daily credits remaining", "Daily credits"],
+    ["Daily credits \t\n REMAINING", "Daily credits"],
+    ["remaining", "remaining"],
+    ["creditsremaining", "creditsremaining"],
+    ["credits remaining ", "credits remaining "],
+    ["credits ", "credits "],
+  ]) {
+    const result = normalizeAntigravityUsage({ groups: [{ displayName: "Custom", buckets: [{ displayName, remainingFraction: 0.5 }] }] }, { provider: "antigravity" });
+    assert.ok(result.supported && result.usage.status === "ok");
+    assert.equal(result.usage.windows[0].label, `Custom: ${expected}`);
+  }
+});
+
+test("Antigravity handles long upstream quota names without blocking the host", () => {
+  // Isolate the CPU-bound regression so a bad suffix matcher cannot hang the suite.
+  execFileSync(process.execPath, ["--import", "tsx", "--input-type=module", "-e", `
+    import assert from "node:assert/strict";
+    import { normalizeAntigravityUsage } from "./usage.ts";
+    const displayName = "credits" + " ".repeat(300_000) + "unknown";
+    const result = normalizeAntigravityUsage({ groups: [{ displayName: "Custom", buckets: [{ displayName, remainingFraction: 0.5 }] }] }, { provider: "antigravity" });
+    assert.ok(result.supported && result.usage.status === "ok");
+    assert.equal(result.usage.windows[0].label, "Custom: " + displayName);
+  `], { cwd: new URL(".", import.meta.url), timeout: 5_000, stdio: "pipe" });
 });

@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1 - 2026-10-16
+
+- Normalize Antigravity quota-name suffixes in linear time, including unusually long upstream labels.
+- Add isolated regression coverage and preserve existing label semantics.
+
 ## 0.3.0 - 2026-10-16
 
 - Publish a standalone quota dashboard using a source-adapter registry.

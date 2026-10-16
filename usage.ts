@@ -209,12 +209,18 @@ export function normalizeGrokUsage(raw: unknown, account: CliproxyUsageAccount):
   return { supported: true, usage: { status: "ok", accountEmail: null, planLabel: usageLabel(account), windows } };
 }
 
+function antigravityLimitLabel(displayName: string): string {
+  // Match a fixed-size suffix, then trim its preceding whitespace in linear time.
+  const suffix = /\sremaining$/i.exec(displayName);
+  return suffix ? displayName.slice(0, suffix.index).trimEnd() : displayName;
+}
+
 function antigravityBucketLabel(group: JsonRecord, bucket: JsonRecord): string {
   const groupLabel = asString(group.displayName) ?? "Antigravity";
   const window = asString(bucket.window)?.toLowerCase();
   const limitLabel = window === "weekly" ? "Weekly limit"
     : window === "5h" ? "5-hour limit"
-      : (asString(bucket.displayName) ?? "Quota").replace(/\s+remaining$/i, "");
+      : antigravityLimitLabel(asString(bucket.displayName) ?? "Quota");
   return `${groupLabel}: ${limitLabel}`;
 }
 
