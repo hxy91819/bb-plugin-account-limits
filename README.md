@@ -26,13 +26,13 @@ Requires a BB build supporting Plugin SDK **0.6.37** or newer (including public 
 Install the stable Git release:
 
 ```sh
-bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@v0.3.1' --yes
+bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@v0.3.2' --yes
 ```
 
 Or download the prebuilt `.tgz` and checksums from [Releases](https://github.com/hxy91819/bb-plugin-account-limits/releases), verify the SHA-256, then:
 
 ```sh
-tar -xzf bb-plugin-account-limits-0.3.1.tgz
+tar -xzf bb-plugin-account-limits-0.3.2.tgz
 npm install --prefix ./package --omit=dev --omit=optional --ignore-scripts
 bb plugin install ./package --yes
 ```

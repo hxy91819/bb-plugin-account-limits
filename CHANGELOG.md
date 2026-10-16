@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2 - 2026-10-16
+
+- Replace the crowded quota mark with a simple gauge that stays clear at sidebar sizes.
+- Use the same gauge in plugin branding, sidebar navigation and the dashboard header.
+
 ## 0.3.1 - 2026-10-16
 
 - Normalize Antigravity quota-name suffixes in linear time, including unusually long upstream labels.
