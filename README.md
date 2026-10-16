@@ -33,10 +33,11 @@ Or download the prebuilt `.tgz` and checksums from [Releases](https://github.com
 
 ```sh
 tar -xzf bb-plugin-account-limits-0.3.0.tgz
+npm install --prefix ./package --omit=dev --omit=optional --ignore-scripts
 bb plugin install ./package --yes
 ```
 
-The archive contains portable JavaScript bundles, source, manifest and icons; no OS-specific executable or credentials. Use the same plugin on Linux, macOS or Windows in a compatible BB runtime. Individual upstream quota endpoints still depend on the service and your account permissions.
+The archive contains portable JavaScript bundles, source, manifest and icons; no OS-specific executable or credentials. The dependency step above is required because BB rebuilds the frontend for local-path installs. Node.js 22+ is needed for this archive workflow too. Use the same plugin on Linux, macOS or Windows in a compatible BB runtime. Individual upstream quota endpoints still depend on the service and your account permissions.
 
 Open **账户额度** in BB's sidebar. With Account Pooler enabled and accounts added, no extra configuration is needed.
 

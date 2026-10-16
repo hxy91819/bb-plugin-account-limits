@@ -90,6 +90,8 @@
     "README.md",
     "LICENSE",
     "THIRD_PARTY_NOTICES.md",
+    "SECURITY.md",
+    "weekly-pace.md",
     "PLUGIN_OVERVIEW.md",
     "CHANGELOG.md",
     "app.tsx",
