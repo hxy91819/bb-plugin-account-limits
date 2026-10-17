@@ -7,12 +7,13 @@
 - **BB Account Pooler**：自动读取已启用的 Claude、Codex 账号，无须复制登录凭证。
 - **CLI Proxy**：可选来源，配置后才出现。没有配置时不显示，也不发送代理请求。
 - 保留账号/池视图、剩余/已用切换、重置倒计时、Claude 总周与模型上限关系。
+- 池视图标明“整池节奏”，直接显示最近重置的一批账号还有多少周额度、是否耗尽或 5h 暂受限；多账号悬停查看各自余量。摘要始终显示剩余，不随“已用”模式倒转。
 - 周建议为“可多用 / 正常用 / 节约用”，数据缺失或过时则暂不判断。多账号分别计算重置时间，临期宽裕账号放在悬停解释中。
 
 安装：
 
 ```sh
-bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@v0.3.2' --yes
+bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@v0.3.3' --yes
 ```
 
 也可从 GitHub Releases 下载 `.tgz` 和校验文件，验证后解压，先执行 `npm install --prefix ./package --omit=dev --omit=optional --ignore-scripts` 安装声明的依赖，再执行 `bb plugin install ./package --yes`。本地路径安装会重建前端，因此解压安装也需要 Node.js 22+。需要支持 Plugin SDK 0.6.37 的 BB；源码安装需要 Node.js 22+。安装包是跨平台 JavaScript，不携带本机凭证。

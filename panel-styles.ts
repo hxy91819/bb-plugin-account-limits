@@ -96,6 +96,16 @@ export const panelStyles = `
 .limits-panel .limits-recovery-legend { display: flex; align-items: start; gap: 8px; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; margin: -2px 0 16px; }
 .limits-panel .limits-recovery-key { width: 32px; height: 5px; border-radius: 3px; margin-top: 6px; flex-shrink: 0; background: linear-gradient(90deg, var(--limits-fill), color-mix(in srgb, var(--limits-fill) 25%, var(--card))); }
 .limits-panel .limits-reset { color: var(--muted-foreground); font-size: 11px; line-height: 1.6; font-variant-numeric: tabular-nums; margin-top: 5px; overflow-wrap: anywhere; }
+.limits-panel .limits-pace-scope { font-weight: 400; margin-right: 5px; }
+.limits-panel .limits-next-reset { line-height: 1.8; }
+.limits-panel .limits-next-reset-time { color: var(--foreground); }
+.limits-panel .limits-next-reset-count, .limits-panel .limits-next-reset-category { white-space: nowrap; }
+.limits-panel .limits-next-reset-category { display: inline-block; }
+.limits-panel .limits-next-reset-state { font-weight: 550; color: var(--foreground); }
+.limits-panel .limits-next-reset-state[data-state=exhausted] { color: var(--limits-danger-text); }
+.limits-panel .limits-next-reset-state[data-state=unknown] { font-weight: 400; color: var(--muted-foreground); }
+.limits-panel .limits-next-reset-priority { display: inline-block; margin-left: 7px; color: color-mix(in srgb, var(--primary) 60%, var(--foreground)); font-weight: 550; }
+.limits-panel .limits-pool-coverage { margin-top: 1px; font-size: 10px; }
 .limits-panel .limits-quotas { min-width: 0; }
 .limits-panel .limits-quotas--weekly { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
 .limits-panel .limits-weekly { min-width: 0; }
@@ -156,6 +166,8 @@ export const panelStyles = `
   .limits-panel .limits-refresh { width: 36px; height: 36px; }
   .limits-panel .limits-meters[data-columns='3'], .limits-panel .limits-meters[data-columns='4'] { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .limits-panel .limits-meter-number { font-size: 16px; }
+  .limits-panel .limits-next-reset-time { display: block; }
+  .limits-panel .limits-next-reset-divider { display: none; }
   .limits-panel .limits-footnote { padding: 10px 16px; }
 }
 @container limits (max-width: 380px) {

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.3 - 2026-10-17
+
+- Show the nearest weekly reset batch with individual remaining, exhausted or 5h-restricted states.
+- Label pool-wide pacing explicitly and highlight existing near-reset priority opportunities.
+- Keep unknown/stale/overdue quota pending confirmation; retain unused accounts in the nearest batch.
+
 ## 0.3.2 - 2026-10-16
 
 - Replace the crowded quota mark with a simple gauge that stays clear at sidebar sizes.

@@ -13,6 +13,7 @@ A quota dashboard for [BB](https://getbb.app). See subscription windows, account
 - Gives each source a collapsible section; folding, account/pool view and remaining/used mode persist in the browser.
 - Shows each account's reset time. Pool bars use shades for upcoming reset batches, with hover details.
 - Shows weekly pacing suggestions without inventing missing quota or treating model caps as extra capacity.
+- Separates the pool-wide pace from its nearest reset batch: current weekly remainder, exhausted or 5h-restricted accounts, and which allowance to use first.
 - Keeps separate sources, machines and model groups separate. Account records are not a count of independent subscriptions.
 
 **No CLI Proxy configuration means no CLI Proxy section and no proxy requests.** Account Pooler is optional too: an absent or disabled plugin is skipped. If a configured source fails, its error or cached snapshot remains visible.
@@ -26,13 +27,13 @@ Requires a BB build supporting Plugin SDK **0.6.37** or newer (including public 
 Install the stable Git release:
 
 ```sh
-bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@v0.3.2' --yes
+bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@v0.3.3' --yes
 ```
 
 Or download the prebuilt `.tgz` and checksums from [Releases](https://github.com/hxy91819/bb-plugin-account-limits/releases), verify the SHA-256, then:
 
 ```sh
-tar -xzf bb-plugin-account-limits-0.3.2.tgz
+tar -xzf bb-plugin-account-limits-0.3.3.tgz
 npm install --prefix ./package --omit=dev --omit=optional --ignore-scripts
 bb plugin install ./package --yes
 ```
@@ -70,7 +71,7 @@ CLI Proxy's API-key-only routes are not discovered as OAuth accounts. Muse can e
 
 Claude's all-model weekly allowance and Fable/Opus model caps have different denominators. Model caps appear under the total week and are never added to it. Accounts that do not report all-model weekly quota form a separate pool.
 
-Pool averages use `poolWeight` (default 1); reset segments use each account's own timestamp. Weekly advice compares remaining quota with a uniform seven-day budget, with individual near-reset opportunities in its hover explanation. It is an estimate of spending pace, not a prediction of future consumption. Stale, incomplete or overdue measurements are not promoted to available quota.
+Pool averages use `poolWeight` (default 1); reset segments use each account's own timestamp. Weekly advice compares remaining quota with a uniform seven-day budget, with individual near-reset opportunities in its hover explanation. A visible nearest-reset summary identifies only the earliest reported batch; its percentages always mean each account's remaining week, even in used mode. Hover shows the individual accounts. Fully unused accounts stay included, overdue/stale observations await confirmation, and unknown reset times are explicit. It is an estimate of spending pace, not a prediction of future consumption. Stale, incomplete or overdue measurements are not promoted to available quota.
 
 Refresh-all reads available sources; a card refresh targets only its source and provider. Proxy quotas are cached for 30 minutes. Folding a section does not send extra requests. Account Pooler owns its own quota cache.
 

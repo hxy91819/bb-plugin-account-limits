@@ -1,6 +1,6 @@
 {
   "name": "bb-plugin-account-limits",
-  "version": "0.3.2",
+  "version": "0.3.3",
   "type": "module",
   "engines": {
     "bb": ">=0.42",
@@ -101,6 +101,7 @@
     "contract.ts",
     "pool.ts",
     "pool-recovery.ts",
+    "pool-reset.ts",
     "weekly-pace.ts",
     "panel-styles.ts",
     "provider-icons.tsx",

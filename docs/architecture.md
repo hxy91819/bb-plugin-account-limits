@@ -14,6 +14,7 @@ The domain types are `QuotaAccount`, `ProviderSnapshot`, `QuotaSourceId` and `Ac
 - `server.ts`: host discovery, proxy cache and public RPC/CLI wiring. `createPanelSnapshotReader` checks host configuration before considering cached quota; removing configuration clears old proxy rows. Empty config does not become an error source. Hosts with no previous data and no reachable adapter stay absent.
 - `account-pool-panel.ts`: consumes only Account Pooler's public `provider-usage.v1.listResources/getResource`. An unavailable installed source retains its last observation with a warning. Account Pooler is listed only once because it is shared across machines.
 - `usage-source.ts`: exposes only proxy resources to BB's native Provider Usage consumer; it does not export Account Pooler back into itself. Discovery is cache-only. Existing resource IDs are retained.
+- `pool-reset.ts`: selects the earliest reported weekly reset batch, retaining unused accounts and each individual remainder/state. It reuses per-account weekly pace quality checks, keeps overdue observations pending, and marks unreported reset times explicitly.
 - `pool.ts`, `pool-recovery.ts`, `weekly-pace.ts`: pure shared calculations. Sources and independent window identities are never combined. Missing all-model weekly quota is isolated, not interpreted as unlimited.
 - `app.tsx`, `panel-styles.ts`: source-level native disclosure controls, scoped host-token CSS, source/provider refresh, theme-aware custom SVG glyph. Fold state is local to this browser and independent of account/pool and display mode.
 

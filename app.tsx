@@ -6,6 +6,7 @@ import { AntigravityIcon, GrokIcon } from "./provider-icons.js";
 import { panelStyles } from "./panel-styles.js";
 import { buildPoolRecovery, type PoolRecovery } from "./pool-recovery.js";
 import { buildWeeklyPace, isWeeklyBudget, type WeeklyPace } from "./weekly-pace.js";
+import { buildNextWeeklyReset, type NextWeeklyReset, type ResetAccount } from "./pool-reset.js";
 
 function compactReset(value: string | null, now: number): string {
   const resetAt = value ? Date.parse(value) : NaN;
@@ -79,7 +80,7 @@ function remainingPercent(usedPercent: number): number {
   return Math.max(0, Math.min(100, 100 - usedPercent));
 }
 
-type MeterWindow = QuotaWindow & { detail?: string; displayLabel?: string; recovery?: PoolRecovery | null; pace?: WeeklyPace | null };
+type MeterWindow = QuotaWindow & { detail?: string; displayLabel?: string; recovery?: PoolRecovery | null; pace?: WeeklyPace | null; pooled?: boolean; nextReset?: NextWeeklyReset };
 
 function accountWindows(account: QuotaAccount, now: number, updatedAt: string | null): MeterWindow[] {
   if (account.usage.status !== "ok") return [];
@@ -129,6 +130,36 @@ function ProviderMark({ id, name }: { id: string; name: string }) {
   return <span className="limits-mark-letter" aria-hidden="true">{id.includes("codex") ? "⌘" : name.slice(0, 1).toUpperCase()}</span>;
 }
 
+function resetAccountLabel(account: ResetAccount): string {
+  if (account.state === "unknown") return "余量待确认";
+  if (account.state === "exhausted") return "周额已用尽";
+  return `周剩 ${recoveryNumber(account.remainingPercent!)}%${account.state === "blocked" ? "，5h 暂受限" : ""}`;
+}
+
+function NextReset({ summary, now }: { summary: NextWeeklyReset; now: number }) {
+  const prefix = summary.unknownAccounts > 0 ? "最近已知重置" : "最近重置";
+  if (summary.resetsAt === null) return <p className="limits-reset limits-next-reset">最近重置时间未知</p>;
+  const countdown = compactReset(summary.resetsAt, now).replace(/^还剩 /u, "").replace(/重置$/u, "").replaceAll(" ", "");
+  const counts = { available: 0, exhausted: 0, blocked: 0, unknown: 0 };
+  for (const account of summary.accounts) counts[account.state] += 1;
+  const states = summary.accounts.length === 1 ? [resetAccountLabel(summary.accounts[0]!)] : [
+    counts.available > 0 ? `${counts.available} 有余量` : "",
+    counts.exhausted > 0 ? `${counts.exhausted} 已耗尽` : "",
+    counts.blocked > 0 ? `${counts.blocked} 5h 暂受限` : "",
+    counts.unknown > 0 ? `${counts.unknown} 待确认` : "",
+  ].filter(Boolean);
+  const prioritize = summary.accounts.some(account => account.prioritize);
+  const details = summary.accounts.map(account => `${account.label}：${resetAccountLabel(account)}${account.prioritize ? "，建议先用" : ""}${account.state === "unknown" ? `（${account.reason}）` : ""}`).join("；")
+    + (summary.unknownAccounts > 0 ? `；另有 ${summary.unknownAccounts} 个账号的周窗口或重置时间未知。` : "");
+  return <p className="limits-reset limits-next-reset" role="note" aria-label={`${prefix}账号：${countdown}。${details}`} title={details}>
+    <span className="limits-next-reset-time">{prefix}：{countdown}</span>
+    <span className="limits-next-reset-divider" aria-hidden="true"> · </span>
+    <span className="limits-next-reset-count">{summary.accounts.length} 个账号 · </span>
+    <span className="limits-next-reset-state" data-state={counts.unknown === summary.accounts.length ? "unknown" : counts.exhausted === summary.accounts.length ? "exhausted" : "available"}>{states.map((state, index) => <span key={state} className={states.length > 1 ? "limits-next-reset-category" : undefined}>{state}{index < states.length - 1 ? "、" : ""}</span>)}</span>
+    {prioritize && <span className="limits-next-reset-priority">建议先用</span>}
+  </p>;
+}
+
 function WindowMeter({ window, now, mode }: { window: MeterWindow; now: number; mode: DisplayMode }) {
   const label = displayWindowLabel(window);
   const remaining = remainingPercent(window.usedPercent);
@@ -140,14 +171,16 @@ function WindowMeter({ window, now, mode }: { window: MeterWindow; now: number; 
       <div className="limits-meter-title">
         <span className="limits-meter-label" title={window.displayLabel ?? shortWindowLabel(label)}>{window.displayLabel ?? shortWindowLabel(label)}</span>
         {window.pace && <span className="limits-pace" data-level={window.pace.level} role="note"
-          aria-label={`周额度建议：${window.pace.label}。${window.pace.reason}`} title={window.pace.reason}>{window.pace.label}</span>}
+          aria-label={`周额度建议：${window.pace.label}。${window.pooled ? "整池节奏。" : ""}${window.pace.reason}`} title={window.pace.reason}>{window.pooled ? <><span className="limits-pace-scope">整池节奏</span><span>{window.pace.label}</span></> : window.pace.label}</span>}
       </div>
       <span className="limits-meter-number">{`${Math.round(percent)}%`}</span>
     </div>
     <div className={`limits-meter-track${window.recovery && window.recovery.usedPercent > 0 ? " limits-meter-track--recovery" : ""}`} role="progressbar" aria-label={`${label} ${mode === "used" ? "已用" : "剩余"}额度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} title={`${label} · ${reset}`}>
       {window.recovery && window.recovery.usedPercent > 0 ? <RecoverySegments recovery={window.recovery} mode={mode} now={now} /> : <div className="limits-meter-fill" style={{ width: `${percent}%` }} />}
     </div>
-    <p className="limits-reset">{window.detail ? `${reset} · ${window.detail}` : reset}</p>
+    {window.nextReset
+      ? <><NextReset summary={window.nextReset} now={now} /><p className="limits-reset limits-pool-coverage">{window.detail}</p></>
+      : <p className="limits-reset">{window.detail ? `${reset} · ${window.detail}` : reset}</p>}
   </li>;
 }
 
@@ -207,7 +240,7 @@ function QuotaWindows({ providerId, windows, now, mode }: {
 }
 
 function poolWindowDetail(window: PoolWindow, totalAccounts: number): string {
-  const exhausted = window.exhausted > 0 ? ` · ${window.exhausted} 账号已耗尽` : "";
+  const exhausted = window.exhausted > 0 ? ` · 全池 ${window.exhausted} 账号已耗尽` : "";
   return `覆盖 ${window.accounts}/${totalAccounts}${exhausted}`;
 }
 
@@ -236,6 +269,8 @@ function PoolGroupUsage({ providerId, accounts, providerUsage, updatedAt, now, m
   return <QuotaWindows providerId={providerId} windows={pool.windows.map(window => ({
     accountLabel: null, label: window.label, usedPercent: window.usedPercent, resetsAt: window.resetsAt,
     detail: poolWindowDetail(window, pool.totalAccounts),
+    pooled: true,
+    nextReset: isWeeklyBudget(window.label) ? buildNextWeeklyReset(accounts, window.id, now, updatedAt) : undefined,
     recovery: buildPoolRecovery(accounts, window.id, now),
     pace: isWeeklyBudget(window.label) ? buildWeeklyPace(accounts, window.id, now, updatedAt) : null,
   }))} now={now} mode={mode} />;
