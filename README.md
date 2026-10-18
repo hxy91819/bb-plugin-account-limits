@@ -33,7 +33,7 @@ bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@
 Or download the prebuilt `.tgz` and checksums from [Releases](https://github.com/hxy91819/bb-plugin-account-limits/releases), verify the SHA-256, then:
 
 ```sh
-tar -xzf bb-plugin-account-limits-0.3.3.tgz
+tar -xzf bb-plugin-account-limits-0.3.4.tgz
 npm install --prefix ./package --omit=dev --omit=optional --ignore-scripts
 bb plugin install ./package --yes
 ```
