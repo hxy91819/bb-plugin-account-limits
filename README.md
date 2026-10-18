@@ -8,6 +8,7 @@ A quota dashboard for [BB](https://getbb.app). See subscription windows, account
 
 ## What it does
 
+- Reads existing BB providers (including named Codex homes and supported ACP providers) through BB's public provider maintenance API, on each connected machine.
 - Reads Claude and Codex accounts from **BB Account Pooler** through its public usage API.
 - Optionally reads **CLI Proxy** OAuth accounts: Claude, Codex, Grok, Antigravity and Kimi. Other providers can expose verified cached quota signals.
 - Gives each source a collapsible section; folding, account/pool view and remaining/used mode persist in the browser.
@@ -39,7 +40,11 @@ bb plugin install ./package --yes
 
 The archive contains portable JavaScript bundles, source, manifest and icons; no OS-specific executable or credentials. The dependency step above is required because BB rebuilds the frontend for local-path installs. Node.js 22+ is needed for this archive workflow too. Use the same plugin on Linux, macOS or Windows in a compatible BB runtime. Individual upstream quota endpoints still depend on the service and your account permissions.
 
-Open **账户额度** in BB's sidebar. With Account Pooler enabled and accounts added, no extra configuration is needed.
+Open **账户额度** in BB's sidebar. Existing usage-capable BB providers appear under **BB 已有账户** without extra configuration. Verified native Codex/Claude collectors record successful collection times for weekly pacing; third-party sources without reliable observation times keep pacing unknown. Account Pooler and CLI Proxy remain optional independent sources.
+
+Click the bottom-left **账户额度** icon to open the disclosure; startup and plugin reload do not force it open or replace another plugin’s disclosure. It offers a compact service selector, remaining quota bars, reset countdowns, weekly pace and a link to the full dashboard. The compact header keeps an at-a-glance percentage card for each service. Cursor’s subscription and on-demand percentages sit side by side in one card, with independent colors and equal card heights. Cursor subscription allowance and on-demand budget are shown as separate percentages with independent warning colors and reminder names; a missing budget window is omitted rather than inferred. The compact view follows the full page’s remaining/used and account/pool selections; labels, bars and service percentages update together without extra quota requests. Failed records are hidden by default; the toggle is shared across both views and remembered per browser. The underlying source snapshot and its failures are retained.
+
+Quota reminders default to enabled. A toast appears at 80% and 95% used, once per threshold crossing per window in the current app session. Recovering below a threshold re-arms it. Cached source failures and overdue windows do not create alerts. While the app is visible, a shared monitor checks every five minutes, including with the disclosure closed. You can disable reminders in either view. To replace BB's official usage display on this installation, disable `bb--provider-usage`; providers themselves remain enabled.
 
 ## Optional CLI Proxy setup
 
@@ -97,3 +102,5 @@ Tests use fictional accounts and offline HTTP fixtures. See [architecture](docs/
 The project is extracted from the owner's earlier account-limits tool. The same `account-limits` ID preserves the existing local cache and display preferences. Optional ACP agent launchers from that tool are intentionally outside this standalone quota dashboard; configure agents separately before upgrading if you used those launchers.
 
 MIT licensed; see [LICENSE](LICENSE) and [third-party notices](THIRD_PARTY_NOTICES.md).
+
+When the pool has usable Codex quota, both panels and reminders prefer it over native Codex entries. Native Codex remains a fallback if the pool fails. Other services, including Cursor SDK, remain visible. Provider enablement, routing and raw observations are unchanged.

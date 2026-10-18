@@ -90,7 +90,7 @@ export interface AccountPoolGroup {
 
 /** 按实际报告的额度分组，不从套餐名猜测；查询失败或空响应不视为无周额度账号。 */
 export function groupAccountPools(providerId: string, accounts: readonly QuotaAccount[]): AccountPoolGroup[] {
-  if (!["claude", "cliproxy-claude", "account-pool:claude-code"].includes(providerId)) {
+  if (!["claude", "claude-code", "cliproxy-claude", "account-pool:claude-code"].includes(providerId)) {
     return [{ id: "default", label: null, accounts }];
   }
   const regular: QuotaAccount[] = [];

@@ -1,3 +1,4 @@
+import { createNativeProviderPanelReader } from "./native-provider-panel.js";
 import { createQuotaReader } from "./sources.js";
 import type { BbPluginApi } from "@get-bb/plugin-sdk";
 import {
@@ -218,7 +219,13 @@ export default function accountLimitsPlugin(bb: BbPluginApi) {
       signal: AbortSignal.timeout(45_000),
     }),
   });
+  const readNativeProviders = createNativeProviderPanelReader({
+    listHosts: () => bb.sdk.hosts.list(),
+    listProviders: hostId => bb.sdk.providers.list({ hostId, capability: "usage", signal: AbortSignal.timeout(45_000) }),
+    readUsage: input => bb.sdk.system.usageLimits({ ...input, signal: AbortSignal.timeout(45_000) }),
+  });
   const readAccountLimits = createQuotaReader([
+    { id: "bb-providers", displayName: "BB 已有账户", read: readNativeProviders },
     { id: "cliproxy", displayName: "CLI Proxy", read: readPanelSnapshot },
     { id: "account-pool", displayName: "BB Account Pooler",
       available: async () => (await bb.sdk.plugins.list()).plugins.some(plugin => plugin.id === "account-pool" && plugin.enabled),
@@ -255,7 +262,7 @@ export default function accountLimitsPlugin(bb: BbPluginApi) {
       const snapshot = await readAccountLimits({});
       const cliproxy = { machines: snapshot.machines.filter(machine => machine.source === "cliproxy" && (argv.length === 0 || machine.id === argv[1])) };
       const accountPool = { machines: snapshot.machines.filter(machine => machine.source === "account-pool") };
-      return { exitCode: 0, stdout: JSON.stringify({ cliproxy, accountPool }, null, 2) + "\n" };
+      return { exitCode: 0, stdout: JSON.stringify({ cliproxy, accountPool, bbProviders: { machines: snapshot.machines.filter(machine => machine.source === "bb-providers" && (argv.length === 0 || machine.id === `bb:${argv[1]}`)) } }, null, 2) + "\n" };
     },
   });
 }

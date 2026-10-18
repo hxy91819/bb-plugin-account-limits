@@ -24,6 +24,7 @@ test("Claude 根据全模型周窗口分池，模型周额度不算全模型周�
     ["default", ["weekly-zero", "failed", "empty"]],
     ["without-weekly", ["scoped", "cached-opus", "session-only"]],
   ]);
+  assert.deepEqual(groupAccountPools("claude-code", accounts), groups);
   const otherProvider = groupAccountPools("codex", accounts);
   assert.equal(otherProvider.length, 1);
   assert.deepEqual(otherProvider[0]?.accounts.map(account => account.key), accounts.map(account => account.key));

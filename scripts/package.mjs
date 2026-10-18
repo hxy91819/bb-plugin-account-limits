@@ -19,7 +19,9 @@ for (const target of ['server', 'host']) {
   await writeFile(path, JSON.stringify(map) + '\n');
 }
 await mkdir('release', { recursive: true });
-const packed = JSON.parse(execFileSync('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', 'release'], { encoding: 'utf8' }));
+const packResult = JSON.parse(execFileSync('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', 'release'], { encoding: 'utf8' }));
+// npm versions return either an array or a package-name keyed object.
+const packed = Array.isArray(packResult) ? packResult : Object.values(packResult);
 if (packed.length !== 1) throw new Error('Expected exactly one archive');
 const artifact = packed[0];
 const names = new Set(artifact.files.map(file => file.path));

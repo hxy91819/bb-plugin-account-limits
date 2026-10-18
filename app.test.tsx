@@ -140,6 +140,7 @@ test("两种来源的池恢复分段以悬停提示展示，切换模式或跨�
 test("概览统计账号记录、去掉重复身份标签，并保留多个模型各自的上限与重置时间", async t => {
   installTestPluginRuntime();
   dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.hide-failures", "false");
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-15T00:00:00Z") });
   const app = await loadPluginApp(() => import("./app.js"));
   const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "local", source: "cliproxy", displayName: "本机", status: "connected", error: null,
@@ -190,10 +191,10 @@ test("初次读取有加载状态，空数据可刷新，刷新失败保留页�
   assert.ok(slot.getByRole("status").textContent?.includes("正在读取账户额度"));
   assert.equal((slot.getByRole("button", { name: "刷新全部" }) as HTMLButtonElement).disabled, true);
   await act(async () => { resolveInitial({ machines: [] }); });
-  assert.ok(await slot.findByText("暂无已接入的额度来源。可在 BB Account Pooler 添加账号，或配置 CLI Proxy。"));
+  assert.ok(await slot.findByText("暂无已接入的额度来源。请在 BB 配置支持额度查询的账户，也可接入 Account Pooler 或 CLI Proxy。"));
   await act(async () => { slot.getByRole("button", { name: "刷新全部" }).click(); });
   assert.equal(slot.getByRole("alert").textContent, "暂时无法刷新");
-  assert.ok(slot.getByText("暂无已接入的额度来源。可在 BB Account Pooler 添加账号，或配置 CLI Proxy。"));
+  assert.ok(slot.getByText("暂无已接入的额度来源。请在 BB 配置支持额度查询的账户，也可接入 Account Pooler 或 CLI Proxy。"));
   assert.equal((slot.getByRole("button", { name: "刷新全部" }) as HTMLButtonElement).disabled, false);
   assert.deepEqual(slot.inspection.rpcCalls.map(call => call.input), [{}, { force: true }]);
 });
@@ -483,6 +484,7 @@ test("各账号额度直接显示重置倒计时，并随时间更新而不重�
 
 test("统一页面同时显示两种来源，共用池与账号切换，刷新 Account Pooler 保留 Cliproxy 并移除旧账号", async t => {
   dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.hide-failures", "false");
   installTestPluginRuntime();
   const app = await loadPluginApp(() => import("./app.js"));
   const account = (key: string, percent: number) => ({ key, label: key, weight: 1,
@@ -566,4 +568,210 @@ test("Gemini 已缓存的逆序窗口在账号和池视图都显示 5h 再 7d，
     "Gem 5h 剩余额度", "Gem 7d 剩余额度", "C/G 5h 剩余额度", "C/G 7d 剩余额度",
   ]);
   assert.deepEqual(windows.map(window => window.usedPercent), [21, 16, 31, 26]);
+});
+
+test("BB native accounts render without optional sources and targeted refresh preserves other sources", async t => {
+  installTestPluginRuntime();
+  dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const native: AccountLimitsPanelSnapshot["machines"][number] = { id: "bb:local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
+    providers: [{ id: "codex", displayName: "Native Codex", updatedAt: null,
+      usage: { status: "ok", planLabel: "Pro", windows: [] }, accounts: [{ key: "codex", label: "demo@example.test", weight: 1,
+        usage: { status: "ok", planLabel: "Pro", windows: [{ label: "Weekly limit", usedPercent: 40, resetsAt: null }] } }] }] };
+  const pool: AccountLimitsPanelSnapshot["machines"][number] = { id: "pool", source: "account-pool", displayName: "Pool", status: "connected", error: null, providers: [] };
+  const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: (raw: unknown) => ({ machines: (raw as { source?: string }).source ? [native] : [native, pool] }) } });
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await slot.findByLabelText("BB 已有账户 来源");
+  assert.ok(slot.getByText("demo@example.test"));
+  assert.ok(slot.getByRole("progressbar", { name: /Weekly limit 剩余额度/u }));
+  await act(async () => { slot.getByRole("button", { name: "刷新 Native Codex 额度" }).click(); });
+  assert.ok(slot.getByLabelText("BB 已有账户 来源"));
+  assert.ok(slot.getByLabelText("BB Account Pooler 来源"));
+  assert.deepEqual(slot.inspection.rpcCalls.at(-1)?.input, { source: "bb-providers", providerIds: ["codex"], force: true });
+});
+
+test("failed accounts are hidden by default, can be restored, and the preference survives remount", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
+    providers: [{ id: "claude-code", displayName: "Claude", updatedAt: null, usage: { status: "expired" },
+      accounts: [{ key: "failed", label: "Failed account", weight: 1, usage: { status: "expired" } }] }] }] };
+  const render = () => renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  let slot = render();
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await slot.findByText(/暂无可显示的额度/u);
+  assert.equal((slot.getByRole("checkbox", { name: "隐藏获取失败" }) as HTMLInputElement).checked, true);
+  assert.equal(slot.queryByText("Failed account"), null);
+  await act(async () => { slot.getByRole("checkbox", { name: "隐藏获取失败" }).click(); });
+  assert.ok(slot.getByText("Failed account"));
+  assert.ok(slot.getByText("账号登录已过期。"));
+  slot.lifecycle.unmount(); slot = render();
+  assert.ok(await slot.findByText("Failed account"));
+});
+
+test("sidebar compact view shares data and preferences with full page and opens the full dashboard", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  assert.equal(footer.kind, "disclosure");
+  if (footer.kind !== "disclosure") return;
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
+    providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
+      { key: "ok", label: "Healthy", weight: 1, usage: { status: "ok", planLabel: null, windows: [{ label: "Weekly limit", usedPercent: 96, resetsAt: null }] } },
+      { key: "bad", label: "Failed", weight: 1, usage: { status: "error", message: "No quota" } },
+    ] }] }] };
+  let reads = 0; let dismissed = 0;
+  const rpc = { readAccountLimits: () => { reads++; return snapshot; } };
+  const compact = renderSlot(footer, { dismiss: () => { dismissed++; } }, { rpc });
+  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await compact.findByText("Healthy");
+  assert.ok(compact.getByRole("button", { name: "Codex" }));
+  assert.equal(compact.queryByText("Failed"), null);
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
+  t.after(() => full.lifecycle.unmount());
+  await within(full.container).findByText("Healthy");
+  assert.equal(reads, 1);
+  await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
+  assert.equal(within(compact.container).getByRole("progressbar", { name: "Weekly limit 已用额度" }).getAttribute("aria-valuenow"), "96");
+  assert.ok(within(compact.container).getByRole("button", { name: "Codex" }));
+  assert.ok(within(compact.container).getByText("已用额度 · 账号"));
+  await act(async () => { within(full.container).getByRole("button", { name: "池" }).click(); });
+  assert.ok(within(compact.container).getByText("已用额度 · 池"));
+  assert.equal(within(compact.container).queryByText("Healthy"), null);
+  await act(async () => { within(full.container).getByRole("button", { name: "账号" }).click(); within(full.container).getByRole("button", { name: "剩余" }).click(); });
+  assert.equal(within(compact.container).getByRole("progressbar", { name: "Weekly limit 剩余额度" }).getAttribute("aria-valuenow"), "4");
+  assert.equal(reads, 1);
+  await act(async () => { compact.getByLabelText("额度显示设置").click(); });
+  await act(async () => { compact.getByRole("checkbox", { name: "隐藏失败" }).click(); });
+  assert.ok(within(compact.container).getByText("Failed"));
+  assert.ok(within(full.container).getByText("Failed"));
+  await act(async () => { compact.getByRole("button", { name: "完整页面" }).click(); });
+  assert.equal(dismissed, 1);
+  assert.equal(compact.inspection.navigateCalls.length, 1);
+});
+
+test("collapsed footer monitoring checks thresholds without duplicate alerts and stops on unmount", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-17T00:00:00Z") });
+  const { toast } = await import("sonner");
+  const warnings: string[] = [];
+  t.mock.method(toast, "warning", (message: unknown) => { warnings.push(String(message)); return 1; });
+  const app = await loadPluginApp(() => import("./app.js"));
+  let used = 85; let reads = 0;
+  const overlay = renderSlot(app.appOverlays[0]!, {}, { rpc: { readAccountLimits: () => {
+    reads++;
+    return { machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
+      providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
+        { key: "ok", label: "Healthy", weight: 1, usage: { status: "ok", planLabel: null, windows: [{ label: "Weekly limit", usedPercent: used, resetsAt: null }] } },
+      ] }] }] };
+  } } });
+  t.after(() => { overlay.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await act(async () => { await Promise.resolve(); });
+  assert.equal(reads, 1); assert.equal(warnings.length, 1);
+  used = 96;
+  await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
+  assert.equal(reads, 2); assert.equal(warnings.length, 2);
+  await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
+  assert.equal(reads, 3); assert.equal(warnings.length, 2);
+  overlay.lifecycle.unmount();
+  await act(async () => { t.mock.timers.tick(5 * 60_000); });
+  assert.equal(reads, 3);
+});
+
+test("reminders disabled at startup do not consume thresholds and the monitor never forces disclosure open", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.reminders", "false");
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-17T00:00:00Z") });
+  const { toast } = await import("sonner");
+  const warnings: string[] = [];
+  t.mock.method(toast, "warning", (message: unknown) => { warnings.push(String(message)); return 1; });
+  const app = await loadPluginApp(() => import("./app.js"));
+  let used = 85;
+  const overlay = renderSlot(app.appOverlays[0]!, {}, { rpc: { readAccountLimits: () => ({ machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
+    providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
+      { key: "ok", label: "Healthy", weight: 1, usage: { status: "ok", planLabel: null, windows: [{ label: "Weekly limit", usedPercent: used, resetsAt: null }] } },
+    ] }] }] }) } });
+  t.after(() => { overlay.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const setReminders = async (enabled: boolean) => act(async () => {
+    dom.window.localStorage.setItem("account-limits.reminders", String(enabled));
+    dom.window.dispatchEvent(new dom.window.Event("storage"));
+  });
+  await act(async () => { await Promise.resolve(); });
+  assert.equal(warnings.length, 0);
+  assert.equal(app.experimentalSidebarFooterItems[0]!.runtime.getSnapshot().command, null);
+  await setReminders(true);
+  assert.equal(warnings.length, 1);
+  await setReminders(false);
+  used = 96;
+  await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
+  assert.equal(warnings.length, 1);
+  await setReminders(true);
+  assert.equal(warnings.length, 2);
+  await setReminders(false); await setReminders(true);
+  assert.equal(warnings.length, 2);
+});
+
+test("hidden windows pause periodic reads; visibility and focus resume once and are cleaned up", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-17T00:00:00Z") });
+  let visibility = "visible";
+  Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
+  t.after(() => { Reflect.deleteProperty(document, "visibilityState"); dom.window.localStorage.clear(); });
+  const app = await loadPluginApp(() => import("./app.js"));
+  let reads = 0;
+  const overlay = renderSlot(app.appOverlays[0]!, {}, { rpc: { readAccountLimits: () => { reads++; return { machines: [] }; } } });
+  t.after(() => overlay.lifecycle.unmount());
+  await act(async () => { await Promise.resolve(); });
+  assert.equal(reads, 1);
+  visibility = "hidden";
+  await act(async () => { t.mock.timers.tick(6 * 60_000); window.dispatchEvent(new window.Event("focus")); document.dispatchEvent(new window.Event("visibilitychange")); });
+  assert.equal(reads, 1);
+  visibility = "visible";
+  await act(async () => { document.dispatchEvent(new window.Event("visibilitychange")); await Promise.resolve(); });
+  assert.equal(reads, 2);
+  await act(async () => { window.dispatchEvent(new window.Event("focus")); document.dispatchEvent(new window.Event("visibilitychange")); });
+  assert.equal(reads, 2);
+  await act(async () => { t.mock.timers.tick(5 * 60_000 - 1); });
+  assert.equal(reads, 2);
+  await act(async () => { t.mock.timers.tick(1); window.dispatchEvent(new window.Event("focus")); await Promise.resolve(); });
+  assert.equal(reads, 3);
+  overlay.lifecycle.unmount();
+  await act(async () => { t.mock.timers.tick(6 * 60_000); window.dispatchEvent(new window.Event("focus")); document.dispatchEvent(new window.Event("visibilitychange")); });
+  assert.equal(reads, 3);
+});
+
+test("Cursor shows subscription and on-demand budgets separately and follows the shared display mode", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
+    providers: [{ id: "acp-cursor-sdk", displayName: "Cursor (SDK)", updatedAt: null, usage: { status: "ok", planLabel: "Team", windows: [] }, accounts: [
+      { key: "cursor", label: "Cursor (SDK)", weight: 1, usage: { status: "ok", planLabel: "Team", windows: [
+        { label: "Plan usage", usedPercent: 23, resetsAt: "2026-11-01T00:00:00Z" },
+        { label: "On-demand spend", usedPercent: 81, resetsAt: "2026-11-02T00:00:00Z" },
+      ] } },
+    ] }] }] };
+  const rpc = { readAccountLimits: () => snapshot };
+  const compact = renderSlot(footer, { dismiss() {} }, { rpc });
+  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const cursor = await compact.findByRole("button", { name: "Cursor (SDK)" });
+  assert.equal(cursor.querySelectorAll(".limits-compact-service-metric").length, 2);
+  assert.match(cursor.textContent!, /套餐77%按量19%/u);
+  assert.match(cursor.title, /套餐剩余 77%，按量剩余 19%/u);
+  const meters = compact.container.querySelectorAll(".limits-meter");
+  assert.equal(meters[0]!.hasAttribute("data-warning"), false);
+  assert.equal(meters[1]!.getAttribute("data-warning"), "true");
+  assert.ok(within(compact.container).getByText("套餐额度"));
+  assert.ok(within(compact.container).getByText("按量预算"));
+  assert.equal(within(compact.container).getAllByRole("progressbar").length, 2);
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
+  t.after(() => full.lifecycle.unmount());
+  await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
+  assert.match(cursor.title, /套餐已用 23%，按量已用 81%/u);
+  assert.match(cursor.textContent!, /套餐23%按量81%/u);
+  assert.equal(within(compact.container).getByRole("progressbar", { name: "Plan usage 已用额度" }).getAttribute("aria-valuenow"), "23");
+  assert.equal(within(compact.container).getByRole("progressbar", { name: "On-demand spend 已用额度" }).getAttribute("aria-valuenow"), "81");
+  assert.ok(within(full.container).getByText("套餐额度"));
+  assert.ok(within(full.container).getByText("按量预算"));
 });

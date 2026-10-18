@@ -1,8 +1,11 @@
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
-import { definePluginApp, useRpc } from "@get-bb/plugin-sdk/app";
+import { useEffect, useState, type CSSProperties } from "react";
+import { toast } from "sonner";
+import { definePluginApp, experimental_Icon as BbIcon, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
 import { aggregateCliproxyPool, groupAccountPools, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
 import { AntigravityIcon, GrokIcon } from "./provider-icons.js";
+import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, cursorQuotaSummaries, quotaWindowDisplayLabel, type QuotaUiStore } from "./quota-presentation.js";
+import { useQuotaData, useQuotaPreference, useQuotaChoicePreference } from "./quota-ui.js";
 import { panelStyles } from "./panel-styles.js";
 import { buildPoolRecovery, type PoolRecovery } from "./pool-recovery.js";
 import { buildWeeklyPace, isWeeklyBudget, type WeeklyPace } from "./weekly-pace.js";
@@ -22,7 +25,7 @@ function compactReset(value: string | null, now: number): string {
 }
 
 function updatedLabel(value: string | null): string {
-  if (value === null) return "尚无成功测量";
+  if (value === null) return "测量时间未知";
   const elapsedMs = Math.max(0, Date.now() - new Date(value).getTime());
   const minutes = Math.floor(elapsedMs / 60_000);
   if (minutes < 1) return "刚刚更新";
@@ -37,8 +40,6 @@ type QuotaWindow = OkUsage["windows"][number];
 type PanelProvider = AccountLimitsPanelSnapshot["machines"][number]["providers"][number];
 type DisplayMode = "remaining" | "used";
 type PanelView = "accounts" | "pool";
-const displayModeStorageKey = "account-limits.display-mode";
-const panelViewStorageKey = "account-limits.view";
 
 function displayWindowLabel(window: QuotaWindow): string {
   const prefix = window.accountLabel ? `${window.accountLabel} · ` : "";
@@ -111,12 +112,15 @@ function RecoverySegments({ recovery, mode, now }: { recovery: PoolRecovery; mod
     style={{ width: `${segment.percent}%`, "--recovery-strength": `${segment.strength}%` } as CSSProperties} />)}</>;
 }
 
-function PanelIcon({ name, spinning = false }: { name: "refresh" | "accounts" | "pool" | "info" | "layers"; spinning?: boolean }) {
+function PanelIcon({ name, spinning = false }: { name: "refresh" | "accounts" | "pool" | "info" | "layers" | "settings" | "open" | "collapse"; spinning?: boolean }) {
+  if (name === "refresh") return <BbIcon name="RotateCcw" className={`limits-icon${spinning ? " limits-icon--spin" : ""}`} aria-hidden="true" />;
   const paths = {
-    refresh: <><path d="M20 7v5h-5M4 17v-5h5" /><path d="M6.1 7a7 7 0 0 1 11.6-2L20 8M4 16l2.3 3A7 7 0 0 0 17.9 17" /></>,
     accounts: <><circle cx="9" cy="8" r="3" /><path d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6M18 15a5 5 0 0 1 3 4v2" /></>,
     pool: <><path d="m12 3 9 5-9 5-9-5 9-5ZM3 12l9 5 9-5M3 16l9 5 9-5" /></>,
     info: <><circle cx="12" cy="12" r="9" /><path d="M12 11v6M12 7h.01" /></>,
+    settings: <><path d="M4 7h16M4 17h16"/><circle cx="9" cy="7" r="2"/><circle cx="15" cy="17" r="2"/></>,
+    open: <><path d="M14 3h7v7M21 3l-9 9M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5"/></>,
+    collapse: <path d="m6 9 6 6 6-6"/>,
     layers: <><rect x="3" y="3" width="7" height="7" rx="2" /><rect x="14" y="3" width="7" height="7" rx="2" /><rect x="3" y="14" width="7" height="7" rx="2" /><path d="M14 17.5h7M17.5 14v7" /></>,
   };
   return <svg className={`limits-icon${spinning ? " limits-icon--spin" : ""}`} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">{paths[name]}</svg>;
@@ -135,7 +139,7 @@ function WindowMeter({ window, now, mode }: { window: MeterWindow; now: number; 
   const percent = mode === "used" ? 100 - remaining : remaining;
   const reset = compactReset(window.resetsAt, now);
   const depleted = remaining <= 10;
-  return <li className="limits-meter" data-depleted={depleted || undefined}>
+  return <li className="limits-meter" data-pace={window.pace?.level} data-depleted={depleted || undefined} data-warning={remaining <= 20 && !depleted || undefined}>
     <div className="limits-meter-heading">
       <div className="limits-meter-title">
         <span className="limits-meter-label" title={window.displayLabel ?? shortWindowLabel(label)}>{window.displayLabel ?? shortWindowLabel(label)}</span>
@@ -185,8 +189,8 @@ function ModelCap({ window, now, mode }: { window: MeterWindow; now: number; mod
 function QuotaWindows({ providerId, windows, now, mode }: {
   providerId: string; windows: readonly MeterWindow[]; now: number; mode: DisplayMode;
 }) {
-  const ordered = orderQuotaWindows(windows).map(window => ({ ...window, label: displayWindowLabel(window), accountLabel: null }));
-  const claude = ["claude", "cliproxy-claude", "account-pool:claude-code"].includes(providerId);
+  const ordered = orderQuotaWindows(windows).map(window => ({ ...window, label: displayWindowLabel(window), accountLabel: null, displayLabel: window.displayLabel ?? quotaWindowDisplayLabel(providerId, displayWindowLabel(window)) }));
+  const claude = ["claude", "claude-code", "cliproxy-claude", "account-pool:claude-code"].includes(providerId);
   const modelWindows = claude ? ordered.filter(window => modelWeeklyName(window.label) !== null) : [];
   if (modelWindows.length === 0) return <MeterList windows={ordered} now={now} mode={mode} />;
   const totalWindows = ordered.filter(window => normalizeCliproxyWindow(window.label).id === "7d");
@@ -290,7 +294,7 @@ function accountCountLabel(planLabel: string | null): string | null {
 }
 
 function ModelLimitNote({ provider }: { provider: PanelProvider }) {
-  if (!["claude", "cliproxy-claude", "account-pool:claude-code"].includes(provider.id)) return null;
+  if (!["claude", "claude-code", "cliproxy-claude", "account-pool:claude-code"].includes(provider.id)) return null;
   const windows = provider.accounts.length > 0
     ? provider.accounts.flatMap(account => account.usage.status === "ok" ? account.usage.windows.map(window => ({ ...window, accountLabel: null })) : [])
     : provider.usage.status === "ok" ? provider.usage.windows : [];
@@ -298,7 +302,7 @@ function ModelLimitNote({ provider }: { provider: PanelProvider }) {
   return <p className="limits-footnote"><PanelIcon name="info" /><span>模型上限不是额外额度：订阅内使用同时计入总周，百分比分别计算，不可相加。总周缺失时，总余量未知。</span></p>;
 }
 
-const sourceNames: Record<QuotaSourceId, string> = { cliproxy: "CLI Proxy", "account-pool": "BB Account Pooler" };
+const sourceNames: Record<QuotaSourceId, string> = { cliproxy: "CLI Proxy", "account-pool": "BB Account Pooler", "bb-providers": "BB 已有账户" };
 const collapsedSourcesKey = "account-limits.collapsed-sources.v1";
 function SourceGroup({ source, machines, children }: { source: QuotaSourceId; machines: AccountLimitsPanelSnapshot["machines"]; children: React.ReactNode }) {
   const [collapsed, setCollapsed] = useState(() => {
@@ -330,74 +334,22 @@ function QuotaMark() {
   return <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="M4 19a10 10 0 1 1 16 0Z"/><path d="m12 13 4-4"/><circle cx="12" cy="13" r="1.2" fill="currentColor" stroke="none"/></svg>;
 }
 
-function AccountLimitsPanel() {
-  const rpc = useRpc<typeof accountLimitsPanelRpcContract>();
-  const [mode, setMode] = useState<DisplayMode>(() => {
-    try { return window.localStorage.getItem(displayModeStorageKey) === "used" ? "used" : "remaining"; }
-    catch { return "remaining"; }
-  });
-  const changeMode = (next: DisplayMode) => {
-    setMode(next);
-    try { window.localStorage.setItem(displayModeStorageKey, next); }
-    catch { /* 禁用浏览器存储时仍允许本次切换。 */ }
-  };
-  const [view, setView] = useState<PanelView>(() => {
-    try { return window.localStorage.getItem(panelViewStorageKey) === "pool" ? "pool" : "accounts"; }
-    catch { return "accounts"; }
-  });
-  const changeView = (next: PanelView) => {
-    setView(next);
-    try { window.localStorage.setItem(panelViewStorageKey, next); }
-    catch { /* 禁用浏览器存储时仍允许本次切换。 */ }
-  };
+function AccountLimitsPanel({ store }: { store: QuotaUiStore }) {
+  const [hideFailures, setHideFailures] = useQuotaPreference("hide-failures");
+  const [reminders, setReminders] = useQuotaPreference("reminders");
+  const [mode, changeMode] = useQuotaChoicePreference<DisplayMode>("display-mode", "remaining", ["remaining", "used"]);
+  const [view, changeView] = useQuotaChoicePreference<PanelView>("view", "accounts", ["accounts", "pool"]);
   const [now, setNow] = useState(Date.now);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(timer);
   }, []);
-  const [snapshot, setSnapshot] = useState<AccountLimitsPanelSnapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [refreshingProviderIds, setRefreshingProviderIds] = useState<Set<string>>(new Set());
-  const load = useCallback(async (force = false) => {
-    setLoading(true);
-    setError(null);
-    try {
-      setSnapshot(await rpc.call("readAccountLimits", force ? { force: true } : {}));
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "读取账户额度失败。请稍后重试。");
-    } finally {
-      setLoading(false);
-    }
-  }, [rpc]);
-  useEffect(() => { void load(); }, [load]);
+  const { snapshot: rawSnapshot, error, loading, refresh } = useQuotaData(store);
+  const snapshot = visibleQuota(rawSnapshot, hideFailures);
+  const load = (force = false) => refresh(force ? { force: true } : {});
+  const refreshProvider = (providerId: string, source: QuotaSourceId) => refresh({ source, providerIds: [providerId], force: true });
 
-  const refreshProvider = useCallback(async (providerId: string, source: "cliproxy" | "account-pool") => {
-    setRefreshingProviderIds(current => new Set(current).add(providerId));
-    setError(null);
-    try {
-      const refreshed = await rpc.call("readAccountLimits", { source, providerIds: [providerId], force: true });
-      setSnapshot(current => {
-        if (!current) return refreshed;
-        const refreshedSources = new Set(refreshed.machines.map(machine => machine.source ?? "cliproxy"));
-        return {
-          machines: (["cliproxy", "account-pool"] as const).flatMap(source =>
-            (refreshedSources.has(source) ? refreshed.machines : current.machines)
-              .filter(machine => (machine.source ?? "cliproxy") === source)),
-        };
-      });
-    } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "刷新账户额度失败。请稍后重试。");
-    } finally {
-      setRefreshingProviderIds(current => {
-        const next = new Set(current);
-        next.delete(providerId);
-        return next;
-      });
-    }
-  }, [rpc]);
-
-  const sourceGroups = (["account-pool", "cliproxy"] as const).map(source => ({ source,
+  const sourceGroups = (["bb-providers", "account-pool", "cliproxy"] as const).map(source => ({ source,
     machines: snapshot?.machines.filter(machine => (machine.source ?? "cliproxy") === source) ?? [],
   })).filter(group => group.machines.length > 0);
   const providers = snapshot?.machines.flatMap(machine => machine.providers) ?? [];
@@ -429,15 +381,17 @@ function AccountLimitsPanel() {
               onClick={() => changeMode(value)}>{value === "used" ? "已用" : "剩余"}</button>)}
           </div>
           <button type="button" className="limits-button"
-            disabled={loading || refreshingProviderIds.size > 0} onClick={() => void load(true)}><PanelIcon name="refresh" spinning={loading} />{loading && snapshot ? "刷新中" : "刷新全部"}</button>
+            disabled={loading} onClick={() => void load(true)}><PanelIcon name="refresh" spinning={loading} />{loading && snapshot ? "刷新中" : "刷新全部"}</button>
         </div>
       </div>
+      <div className="limits-preferences"><label className="limits-preference"><input type="checkbox" checked={hideFailures} onChange={event => setHideFailures(event.target.checked)} />隐藏获取失败</label>
+      <label className="limits-preference"><input type="checkbox" checked={reminders} onChange={event => setReminders(event.target.checked)} />额度提醒（已用 80% / 95%）</label></div>
       {view === "pool" && providers.length > 0 && <p className="limits-recovery-legend"><span className="limits-recovery-key" aria-hidden="true" />{mode === "used"
         ? "已用部分按预计恢复批次分段，深色较近、浅色较远；斜纹为时间未知或待刷新。"
         : "实色为当前剩余，浅色分段为预计恢复（由近到远）；斜纹为时间未知或待刷新。"}</p>}
       {error && <p role="alert" className="limits-alert">{error}</p>}
       {!snapshot && loading && <p className="limits-loading" role="status"><PanelIcon name="refresh" spinning />正在读取账户额度…</p>}
-      {snapshot && snapshot.machines.length === 0 && <p className="limits-empty">暂无已接入的额度来源。可在 BB Account Pooler 添加账号，或配置 CLI Proxy。</p>}
+      {snapshot && snapshot.machines.length === 0 && <p className="limits-empty">{rawSnapshot?.machines.length ? "暂无可显示的额度。可关闭隐藏获取失败查看失败记录。" : "暂无已接入的额度来源。请在 BB 配置支持额度查询的账户，也可接入 Account Pooler 或 CLI Proxy。"}</p>}
       {sourceGroups.map(group => <SourceGroup key={group.source} source={group.source} machines={group.machines}>
       {group.machines.map(machine => <section key={machine.id} className="limits-source-section" aria-label={`${machine.displayName} 的账户额度`}>
         {group.machines.length > 1 && <h2 className="limits-source-label">{machine.displayName}</h2>}
@@ -445,18 +399,18 @@ function AccountLimitsPanel() {
         {machine.status === "error" && <p className="limits-alert">{machine.error ?? "读取此机器的额度失败。"}</p>}
         {machine.status === "connected" && machine.error && <p role="alert" className="limits-alert">{machine.error}</p>}
         {machine.status === "connected" && machine.providers.length === 0 && <p className="limits-empty">{machine.source === "account-pool" ? "Account Pooler 尚未添加账号。" : "没有启用的 Cliproxy 账户额度。"}</p>}
-        {machine.status === "connected" && machine.providers.map(provider => <article key={provider.id} className="limits-provider" aria-label={`${provider.displayName} · ${machine.source === "account-pool" ? "Account Pooler" : "Cliproxy"}`}>
+        {machine.status === "connected" && machine.providers.map(provider => <article key={provider.id} className="limits-provider" aria-label={`${provider.displayName} · ${machine.source === "bb-providers" ? "BB 已有账户" : machine.source === "account-pool" ? "Account Pooler" : "Cliproxy"}`}>
           <header className="limits-provider-head">
             <div className={`limits-provider-mark${provider.id.includes("claude") ? " limits-provider-mark--claude" : provider.id.includes("codex") ? " limits-provider-mark--codex" : ""}`}><ProviderMark id={provider.id} name={provider.displayName} /></div>
             <div className="limits-provider-title">
               <h2 className="limits-provider-name">{provider.displayName}</h2>
-              <span className="limits-source-badge">{machine.source === "account-pool" ? "Account Pooler" : "Cliproxy"}</span>
+              <span className="limits-source-badge">{machine.source === "bb-providers" ? "BB 已有账户" : machine.source === "account-pool" ? "Account Pooler" : "Cliproxy"}</span>
               {provider.usage.status === "ok" && accountCountLabel(provider.usage.planLabel) && <span className="limits-provider-count">{accountCountLabel(provider.usage.planLabel)}</span>}
             </div>
             <div className="limits-provider-actions">
               <span className="limits-updated">{updatedLabel(provider.updatedAt)}</span>
-              <button type="button" aria-label={`刷新 ${machine.source === "account-pool" ? "Account Pooler " : ""}${provider.displayName} 额度`} title="刷新此服务" className="limits-button limits-refresh" onClick={() => void refreshProvider(provider.id, machine.source ?? "cliproxy")} disabled={loading || refreshingProviderIds.has(provider.id)}>
-                <PanelIcon name="refresh" spinning={refreshingProviderIds.has(provider.id)} />
+              <button type="button" aria-label={`刷新 ${machine.source === "account-pool" ? "Account Pooler " : ""}${provider.displayName} 额度`} title="刷新此服务" className="limits-button limits-refresh" onClick={() => void refreshProvider(provider.id, machine.source ?? "cliproxy")} disabled={loading}>
+                <PanelIcon name="refresh" spinning={loading} />
               </button>
             </div>
           </header>
@@ -469,17 +423,118 @@ function AccountLimitsPanel() {
   </main>;
 }
 
+function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void }) {
+  const { snapshot: rawSnapshot, error, loading, refresh } = useQuotaData(store);
+  const [hideFailures, setHideFailures] = useQuotaPreference("hide-failures");
+  const [reminders, setReminders] = useQuotaPreference("reminders");
+  const navigate = useBbNavigate();
+  const [mode] = useQuotaChoicePreference<DisplayMode>("display-mode", "remaining", ["remaining", "used"]);
+  const [view] = useQuotaChoicePreference<PanelView>("view", "accounts", ["accounts", "pool"]);
+  const [selected, setSelected] = useState("");
+  const [now, setNow] = useState(Date.now);
+  useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(timer); }, []);
+  const snapshot = visibleQuota(rawSnapshot, hideFailures);
+  const entries = snapshot?.machines.flatMap(machine => machine.providers.map(provider => ({
+    key: JSON.stringify([machine.source, machine.id, provider.id]), machine, provider,
+  }))) ?? [];
+  const active = entries.find(entry => entry.key === selected) ?? entries[0];
+  return <section className="limits-panel limits-compact" aria-label="账户额度精简版">
+    <style>{panelStyles}</style>
+    <header className="limits-compact-head">
+      <span className="limits-compact-brand"><QuotaMark /><strong>账户额度</strong></span>
+      <button type="button" className="limits-compact-action" aria-label="刷新精简额度" title="刷新额度" disabled={loading} onClick={() => void refresh({ force: true })}><PanelIcon name="refresh" spinning={loading} /></button>
+      <details className="limits-compact-settings">
+        <summary aria-label="额度显示设置" title="显示设置"><PanelIcon name="settings" /></summary>
+        <div className="limits-compact-options">
+          <label><input type="checkbox" checked={hideFailures} onChange={event => setHideFailures(event.target.checked)} />隐藏失败</label>
+          <label><input type="checkbox" checked={reminders} onChange={event => setReminders(event.target.checked)} />额度提醒</label>
+          <span>已用 80% / 95% 时提醒</span>
+        </div>
+      </details>
+      <button type="button" className="limits-compact-action" aria-label="完整页面" title="打开完整页面" onClick={() => { navigate.toPluginPanel("account-limits"); dismiss(); }}><PanelIcon name="open" /></button>
+      <button type="button" className="limits-compact-action" aria-label="收起账户额度" title="收起" onClick={dismiss}><PanelIcon name="collapse" /></button>
+    </header>
+    {error && <p role="alert" className="limits-alert">{error}</p>}
+    {entries.length > 0 && <div className="limits-compact-services" aria-label="额度服务">
+      {entries.map(entry => {
+        const windows = entry.provider.accounts.flatMap(account => account.usage.status === "ok" ? account.usage.windows : []);
+        const used = windows.length ? Math.max(...windows.map(window => window.usedPercent)) : null;
+        const paceWarning = entry.provider.accounts.some(account => accountWindows(account, now, entry.provider.updatedAt)
+          .some(window => window.pace?.level === "conserve" || window.pace?.level === "blocked"));
+        const tone = used === null ? "unknown" : used >= 95 ? "critical" : used >= 80 || paceWarning ? "warning" : "normal";
+        const percent = used === null ? null : mode === "used" ? used : 100 - used;
+        const name = entry.provider.displayName.replace(" (SDK)", "").replace(" · ", " ");
+        const separate = cursorQuotaSummaries(entry.provider).map(metric => ({ ...metric,
+          percent: Math.round(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent),
+          tone: metric.usedPercent >= 95 ? "critical" : metric.usedPercent >= 80 ? "warning" : "normal",
+        }));
+        const separateLabel = separate.map(metric => `${metric.label}${mode === "used" ? "已用" : "剩余"} ${metric.percent}%`).join("，");
+        return <button type="button" key={entry.key} className="limits-compact-service" data-tone={separate.length ? "normal" : tone} aria-pressed={entry.key === active?.key}
+          aria-label={entry.provider.displayName}
+          title={`${entry.machine.displayName} · ${sourceNames[entry.machine.source ?? "cliproxy"]}${separate.length ? ` · ${separateLabel}（各项分别统计）` : used === null ? "" : ` · 最紧窗口${mode === "used" ? "已用" : "剩余"} ${Math.round(percent!)}%`}`}
+          onClick={() => setSelected(entry.key)}><span className="limits-compact-service-name">{name}</span>{separate.length ? <span className="limits-compact-service-metrics">{separate.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label}</span><strong>{metric.percent}%</strong></span>)}</span> : <span className="limits-compact-service-value">{percent === null ? "—" : `${Math.round(percent)}%`}</span>}</button>;
+      })}
+    </div>}
+    <div className="limits-compact-body">
+      {active ? <>
+        {active.machine.error && <p role="alert" className="limits-alert">{active.machine.error}</p>}
+        {active.machine.status === "disconnected" ? <p className="limits-empty">此机器未连接，无法读取额度。</p> : <>
+          <div className="limits-compact-context"><span title={`${sourceNames[active.machine.source ?? "cliproxy"]} · ${active.machine.displayName}`}>{sourceNames[active.machine.source ?? "cliproxy"]}</span><span>{mode === "used" ? "已用额度" : "剩余额度"} · {view === "pool" ? "池" : "账号"}</span></div>
+          {view === "pool" ? <PoolUsage provider={active.provider} now={now} mode={mode} /> : active.provider.accounts.length ? active.provider.accounts.map(account => <section key={account.key} className="limits-compact-account" aria-label={`${account.label} 的额度`}>
+            <div className="limits-compact-identity"><h3 title={account.label}>{account.label}</h3>{account.usage.status === "ok" && account.usage.planLabel && <span title={account.usage.planLabel}>{account.usage.planLabel}</span>}</div>
+            {account.usage.status === "ok" ? account.usage.windows.length ? <QuotaWindows providerId={active.provider.id} windows={accountWindows(account, now, active.provider.updatedAt).map(window => ({ ...window, displayLabel: shortWindowLabel(window.label) === "周" ? "周额度" : undefined }))} now={now} mode={mode} /> : <p className="limits-message">未报告额度窗口。</p>
+              : <Usage providerId={active.provider.id} usage={account.usage} now={now} mode={mode} />}
+          </section>) : <AccountUsage provider={active.provider} now={now} mode={mode} />}
+          <ModelLimitNote provider={active.provider} />
+        </>}
+      </> : <p className="limits-empty">{loading ? "正在读取额度…" : rawSnapshot?.machines.length ? "暂无可显示的额度，可关闭隐藏失败查看详情。" : "暂无已接入的额度来源。"}</p>}
+      {!hideFailures && snapshot?.machines.filter(machine => machine.providers.length === 0 && machine.error).map(machine => <p key={`${machine.source}:${machine.id}`} className="limits-alert">{machine.displayName}：{machine.error}</p>)}
+    </div>
+  </section>;
+}
+
+function QuotaMonitor({ store }: { store: QuotaUiStore }) {
+  const { snapshot, refresh } = useQuotaData(store);
+  const [reminders] = useQuotaPreference("reminders");
+  const [track] = useState(createQuotaAlertTracker);
+  useEffect(() => {
+    if (!snapshot || !reminders) return;
+    const alerts = track(snapshot);
+    for (const alert of alerts) toast.warning(alert.title, { id: `account-limits:${alert.key}`, duration: 8_000, position: "top-right" });
+  }, [snapshot, reminders, track]);
+  useEffect(() => {
+    let lastRead = Date.now();
+    let disposed = false;
+    const update = () => {
+      if (disposed || document.visibilityState === "hidden" || Date.now() - lastRead < 5 * 60_000) return;
+      lastRead = Date.now();
+      void refresh().catch(() => { /* The shared store renders the read error. */ });
+    };
+    const timer = setInterval(update, 60_000);
+    window.addEventListener("focus", update);
+    document.addEventListener("visibilitychange", update);
+    return () => { disposed = true; clearInterval(timer); window.removeEventListener("focus", update); document.removeEventListener("visibilitychange", update); };
+  }, [refresh]);
+  return null;
+}
+
 export default definePluginApp(app => {
   // Provider Usage resolves these marks by resource providerId, including IDs
   // without an executable agent provider. Keep them scoped to Cliproxy.
   app.slots.experimental_providerIcon({ providerKind: "agent", providerId: "cliproxy-xai", icon: GrokIcon });
   app.slots.experimental_providerIcon({ providerKind: "agent", providerId: "cliproxy-antigravity", icon: AntigravityIcon });
+  const store = createQuotaUiStore();
+  app.experimental_sidebarFooter.register({
+    kind: "disclosure", id: "quota", label: "账户额度", icon: "account-limits/quota",
+    component: ({ dismiss }) => <CompactQuota store={store} dismiss={dismiss} />,
+  });
+  app.slots.experimental_appOverlay({ id: "quota-monitor", component: () => <QuotaMonitor store={store} /> });
   app.slots.navPanel({
     id: "account-limits",
     title: "账户额度",
     // 导航图标优先于插件品牌图标，与 package.json 的 bb.branding.icon 保持一致。
     icon: "account-limits/quota",
     path: "account-limits",
-    component: AccountLimitsPanel,
+    component: () => <AccountLimitsPanel store={store} />,
   });
 });

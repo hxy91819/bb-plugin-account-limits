@@ -1,7 +1,7 @@
 import { defineRpcContract } from "@get-bb/plugin-sdk";
 import { z } from "zod";
 
-export const quotaSourceIdSchema = z.enum(["cliproxy", "account-pool"]);
+export const quotaSourceIdSchema = z.enum(["cliproxy", "account-pool", "bb-providers"]);
 export type QuotaSourceId = z.infer<typeof quotaSourceIdSchema>;
 
 const providerIdsSchema = z.array(z.string().min(1)).min(1).max(64);

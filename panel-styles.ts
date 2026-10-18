@@ -82,11 +82,16 @@ export const panelStyles = `
 .limits-panel .limits-meter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted-foreground); }
 .limits-panel .limits-pace { display: inline-flex; flex-shrink: 0; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--limits-line); color: var(--muted-foreground); background: var(--limits-soft); font-size: 10px; line-height: 1.5; font-weight: 500; }
 .limits-panel .limits-pace[data-level=generous] { color: color-mix(in srgb, var(--primary) 60%, var(--foreground)); border-color: color-mix(in srgb, var(--primary) 20%, var(--card)); background: color-mix(in srgb, var(--primary) 7%, var(--card)); }
-.limits-panel .limits-pace[data-level=conserve], .limits-panel .limits-pace[data-level=exhausted] { color: var(--limits-danger-text); border-color: color-mix(in srgb, var(--destructive) 20%, var(--card)); background: color-mix(in srgb, var(--destructive) 5%, var(--card)); }
+.limits-panel .limits-pace[data-level=conserve], .limits-panel .limits-pace[data-level=blocked] { color: var(--warning-text); border-color: color-mix(in srgb, var(--warning) 35%, var(--card)); background: color-mix(in srgb, var(--warning) 12%, var(--card)); }
+.limits-panel .limits-pace[data-level=exhausted] { color: var(--limits-danger-text); border-color: color-mix(in srgb, var(--destructive) 20%, var(--card)); background: color-mix(in srgb, var(--destructive) 5%, var(--card)); }
 .limits-panel .limits-pace[data-level=unknown] { border-style: dashed; background: transparent; }
 .limits-panel .limits-meter-number { font-size: 17px; font-weight: 550; letter-spacing: -.04em; line-height: 1.1; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .limits-panel .limits-meter-track { height: 4px; overflow: hidden; border-radius: 9px; background: color-mix(in srgb, var(--muted) 70%, var(--card)); }
 .limits-panel .limits-meter-fill { height: 100%; border-radius: inherit; background: var(--limits-fill); transition: width .3s ease; }
+.limits-panel .limits-meter[data-pace=conserve], .limits-panel .limits-meter[data-pace=blocked] { --limits-fill: var(--warning); }
+.limits-panel .limits-meter[data-pace=conserve] .limits-meter-number, .limits-panel .limits-meter[data-pace=blocked] .limits-meter-number { color: var(--warning-text); }
+.limits-panel .limits-meter[data-pace=exhausted] { --limits-fill: var(--destructive); }
+.limits-panel .limits-meter[data-pace=exhausted] .limits-meter-number { color: var(--limits-danger-text); }
 .limits-panel .limits-meter[data-depleted] .limits-meter-number { color: var(--limits-danger-text); }
 .limits-panel .limits-meter[data-depleted] .limits-meter-fill { background: var(--destructive); }
 .limits-panel .limits-meter-track--recovery { display: flex; height: 6px; }
@@ -164,4 +169,66 @@ export const panelStyles = `
 @media (prefers-reduced-motion: reduce) {
   .limits-panel *, .limits-panel *::before, .limits-panel *::after { animation: none !important; transition: none !important; }
 }
+
+.limits-panel .limits-preferences { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 18px; width: fit-content; margin: 0 0 18px; padding: 8px 11px; border: 1px solid var(--limits-line); border-radius: 8px; background: var(--limits-soft); }
+.limits-panel .limits-preference { display: flex; align-items: center; gap: 6px; margin: 0; color: var(--muted-foreground); font-size: 11px; }
+.limits-panel input[type=checkbox] { accent-color: var(--primary); }
+
+.limits-panel.limits-compact {
+  --limits-fill: var(--sidebar-foreground, var(--foreground));
+  height: auto; max-height: min(65vh, 540px); min-width: 0; overflow: auto; container: none;
+  color: var(--sidebar-foreground, var(--foreground)); background: var(--sidebar, var(--background));
+  font-size: 12px; line-height: 1.5;
+}
+.limits-compact .limits-compact-head { display: flex; align-items: center; gap: 2px; padding: 10px 10px 8px; }
+.limits-compact .limits-compact-brand { display: flex; align-items: center; gap: 7px; margin-right: auto; min-width: 0; }
+.limits-compact .limits-compact-brand > svg { width: 14px; height: 14px; color: var(--muted-foreground); }
+.limits-compact .limits-compact-brand strong { font-size: 12px; font-weight: 600; white-space: nowrap; }
+.limits-compact .limits-compact-action, .limits-compact .limits-compact-settings > summary { display: grid; place-items: center; width: 24px; height: 24px; flex-shrink: 0; border: 0; border-radius: 5px; background: transparent; color: var(--muted-foreground); cursor: pointer; padding: 0; }
+.limits-compact .limits-compact-action:hover, .limits-compact .limits-compact-settings > summary:hover { background: var(--sidebar-accent, var(--muted)); color: var(--foreground); }
+.limits-compact .limits-icon { width: 13px; height: 13px; }
+.limits-compact .limits-compact-settings { position: relative; }
+.limits-compact .limits-compact-settings > summary { list-style: none; }
+.limits-compact .limits-compact-settings > summary::-webkit-details-marker { display: none; }
+.limits-compact .limits-compact-options { position: absolute; right: -30px; top: 29px; width: 174px; z-index: 5; display: grid; gap: 10px; padding: 12px; border: 1px solid var(--border); border-radius: 9px; background: var(--popover, var(--background)); box-shadow: 0 6px 20px color-mix(in srgb, var(--foreground) 10%, transparent); }
+.limits-compact .limits-compact-options label { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--foreground); cursor: pointer; }
+.limits-compact .limits-compact-options input { margin: 0; }
+.limits-compact .limits-compact-options > span { font-size: 10px; color: var(--muted-foreground); }
+.limits-compact .limits-compact-services { display: grid; grid-template-columns: repeat(auto-fit, minmax(58px, 1fr)); gap: 3px; padding: 3px; margin: 0 10px 12px; border-radius: 8px; background: var(--sidebar-accent, var(--muted)); }
+.limits-compact .limits-compact-service { display: grid; grid-template-rows: 15px 29px; justify-items: stretch; align-content: center; gap: 2px; min-width: 0; height: 60px; padding: 5px 4px; border: 1px solid transparent; border-radius: 6px; font: inherit; text-align: center; background: transparent; color: var(--muted-foreground); }
+.limits-compact .limits-compact-service-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; line-height: 15px; }
+.limits-compact .limits-compact-service-value { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 1px; font-size: 13px; font-weight: 600; line-height: 17px; font-variant-numeric: tabular-nums; }
+.limits-compact .limits-compact-service-metrics { display: flex; justify-content: center; gap: 7px; min-width: 0; }
+.limits-compact .limits-compact-service-metric { display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; font-size: 8px; line-height: 10px; }
+.limits-compact .limits-compact-service-metric strong { padding-bottom: 1px; font-size: 11px; line-height: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.limits-compact .limits-compact-service[aria-pressed=true] { color: var(--foreground); background: var(--background); border-color: var(--border); box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 4%, transparent); }
+.limits-compact .limits-compact-service:hover { color: var(--foreground); }
+.limits-compact .limits-compact-service[data-tone=warning] .limits-compact-service-value, .limits-compact .limits-compact-service-metric[data-tone=warning] strong { color: var(--warning-text); }
+.limits-compact .limits-compact-service[data-tone=critical] .limits-compact-service-value, .limits-compact .limits-compact-service-metric[data-tone=critical] strong { color: var(--destructive); }
+.limits-compact .limits-compact-body { min-width: 0; padding: 0 12px 12px; }
+.limits-compact .limits-compact-context { display: flex; justify-content: space-between; gap: 10px; margin-bottom: 10px; font-size: 10px; color: var(--muted-foreground); }
+.limits-compact .limits-compact-context > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.limits-compact .limits-compact-account + .limits-compact-account { margin-top: 13px; padding-top: 12px; border-top: 1px solid var(--limits-line); }
+.limits-compact .limits-compact-identity { display: flex; gap: 7px; align-items: baseline; margin-bottom: 10px; min-width: 0; }
+.limits-compact .limits-compact-identity h3 { min-width: 0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; font-weight: 500; }
+.limits-compact .limits-compact-identity > span { max-width: 35%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 9px; line-height: 1.5; padding: 1px 5px; border-radius: 4px; background: var(--sidebar-accent, var(--muted)); color: var(--muted-foreground); }
+.limits-compact .limits-accounts { gap: 12px; }
+.limits-compact .limits-pool { padding: 0; }
+.limits-compact .limits-account { display: block; padding: 0; border: 0; background: transparent; }
+.limits-compact .limits-meters { grid-template-columns: minmax(0, 1fr) !important; gap: 12px; }
+.limits-compact .limits-quotas, .limits-compact .limits-quotas--weekly { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.limits-compact .limits-weekly { padding: 0; border: 0; background: transparent; }
+.limits-compact .limits-meter { padding: 0; }
+.limits-compact .limits-meter-heading { margin-bottom: 6px; }
+.limits-compact .limits-meter-label { font-size: 11px; }
+.limits-compact .limits-meter-number { font-size: 13px; font-weight: 600; }
+.limits-compact .limits-meter-track { height: 4px; }
+.limits-compact .limits-meter[data-warning] .limits-meter-fill { background: var(--warning, #b7791f); }
+.limits-compact .limits-meter[data-warning] .limits-meter-number { color: var(--warning-text, #b7791f); }
+.limits-compact .limits-reset { margin-top: 5px; font-size: 10px; line-height: 1.5; overflow-wrap: normal; }
+.limits-compact .limits-pace { padding: 0 4px; font-size: 9px; }
+.limits-compact .limits-pace[data-level=unknown] { display: none; }
+.limits-compact .limits-footnote { padding: 0; margin-top: 10px; font-size: 9px; }
+.limits-compact .limits-empty { font-size: 11px; padding: 8px 0; }
+.limits-compact .limits-message { font-size: 11px; }
 `;

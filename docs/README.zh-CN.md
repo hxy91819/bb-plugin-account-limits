@@ -17,7 +17,13 @@ bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@
 
 也可从 GitHub Releases 下载 `.tgz` 和校验文件，验证后解压，先执行 `npm install --prefix ./package --omit=dev --omit=optional --ignore-scripts` 安装声明的依赖，再执行 `bb plugin install ./package --yes`。本地路径安装会重建前端，因此解压安装也需要 Node.js 22+。需要支持 Plugin SDK 0.6.37 的 BB；源码安装需要 Node.js 22+。安装包是跨平台 JavaScript，不携带本机凭证。
 
-在侧栏打开“账户额度”。如果只使用 BB Account Pooler，不用创建配置文件。
+在侧栏打开“账户额度”。插件会自动读取 BB 中已配置且支持额度查询的 provider；Account Pooler 和 CLI Proxy 是可选的额外来源。
+
+点击左下角的“账户额度”按钮打开精简面板；启动或重载插件不会强制展开，也不会覆盖其他插件已打开的面板。精简面板显示服务切换、最紧窗口余量、重置倒计时和周使用节奏，并可跳转完整页面。顶部保留各服务的百分比概览卡片；Cursor 的套餐和按量百分比在同一卡片中并排显示，独立变色，所有卡片保持等高。Cursor 的套餐额度与按量预算分别显示、独立变色和提醒，不合并成一个百分比；未返回的窗口不会补成零。精简面板跟随详情页的“已用/剩余”和“账号/池”设置，标签、百分比和额度条同步切换，无需额外查询。“隐藏获取失败”默认开启，可关闭查看失败记录；偏好在当前浏览器保存，并同步到精简版和完整页面。
+
+额度提醒默认开启：已用达到 80% / 95% 时弹出提示，同一窗口在同一档位不重复提醒，恢复余量后再次越线可重新提醒。可在精简版或完整页面关闭。页面可见时每五分钟检查一次；收起面板后仍检查。已核实的原生 Codex/Claude 每次向上游采集额度，成功后记录采集时间，支持周节奏判断；其他无法确认测量时间的来源保持“暂不判断”。
+
+本机部署可停用官方 `bb--provider-usage`，由这个左下角入口替代；停用官方额度显示不影响 provider 本身。
 
 使用 CLI Proxy 时，在**需要查询代理的机器**创建 `~/.config/bb/account-limits/local.json`：
 
@@ -37,3 +43,5 @@ bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@
 该插件不统计对话 token 或预估 API 费用，也不注册可执行 Agent；这些由 BB Usage 和相应 Provider 负责。旧本机工具中的可选 ACP 启动器不属于本开源版，如使用过，需要单独配置。
 
 详见英文 README、[架构](architecture.md)和[算法](../weekly-pace.md)。
+
+账号池有可用 Codex 额度时，精简面板、详情页和额度提醒优先使用账号池，隐藏原生 Codex 重复项；池不可用时回退到原生账户。Cursor SDK 等其他服务仍同时展示。此规则不改变 provider 开关、路由或原始观测。
