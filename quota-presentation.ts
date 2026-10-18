@@ -80,27 +80,59 @@ export function createQuotaUiStore() {
 }
 export type QuotaUiStore = ReturnType<typeof createQuotaUiStore>;
 
-export interface QuotaAlert { key: string; level: number; title: string; }
+export interface QuotaAlert { key: string; level: number; title: string; resetsAt: number | null; }
 export function quotaAlerts(snapshot: AccountLimitsPanelSnapshot): QuotaAlert[] {
   return preferCodexPool(snapshot).machines.flatMap(machine => machine.status !== "connected" || machine.error ? [] : machine.providers.flatMap(provider => {
     const accounts = provider.accounts.length ? provider.accounts : [{ key: "provider", label: provider.displayName, usage: provider.usage }];
-    return accounts.flatMap(account => account.usage.status !== "ok" ? [] : account.usage.windows.flatMap((window, index) => {
-      if (window.resetsAt && Date.parse(window.resetsAt) <= Date.now()) return [];
-      const level = window.usedPercent >= 95 ? 2 : window.usedPercent >= 80 ? 1 : 0;
-      return [{ key: JSON.stringify([machine.source, machine.id, provider.id, account.key, ("id" in window ? window.id : null) ?? window.label, index]), level,
-        title: `${provider.displayName}${account.label === provider.displayName ? "" : ` · ${account.label}`} · ${quotaWindowDisplayLabel(provider.id, window.label) ?? window.label} 已用 ${Math.round(window.usedPercent)}%${level === 2 ? "，额度紧张" : "，请留意余量"}` }];
-    }));
+    return accounts.flatMap(account => {
+      if (account.usage.status !== "ok") return [];
+      const seen = new Set<string>();
+      return account.usage.windows.flatMap(window => {
+        const key = JSON.stringify([machine.source ?? "cliproxy", machine.id, provider.id, account.key, ("id" in window ? window.id : null) ?? window.label]);
+        if (seen.has(key)) return [];
+        seen.add(key);
+        const reset = window.resetsAt ? Date.parse(window.resetsAt) : NaN;
+        if (Number.isFinite(reset) && reset <= Date.now()) return [];
+        const level = window.usedPercent >= 95 ? 2 : window.usedPercent >= 80 ? 1 : 0;
+        return [{ key, level, resetsAt: Number.isFinite(reset) ? reset : null,
+          title: `${provider.displayName}${account.label === provider.displayName ? "" : ` · ${account.label}`} · ${quotaWindowDisplayLabel(provider.id, window.label) ?? window.label} 已用 ${Math.round(window.usedPercent)}%${level === 2 ? "，额度紧张" : "，请留意余量"}` }];
+      });
+    });
   }));
 }
 
-/** Reminder state is per browser session; recoveries allow a later new crossing. */
-export function createQuotaAlertTracker() {
-  const levels = new Map<string, number>();
-  return (snapshot: AccountLimitsPanelSnapshot): QuotaAlert[] => quotaAlerts(snapshot).filter(alert => {
-    const previous = levels.get(alert.key) ?? 0;
-    levels.set(alert.key, alert.level);
-    return alert.level > previous;
-  });
+export interface QuotaAlertStorage {
+  getItem(key: string): string | null;
+  setItem(key: string, value: string): void;
+}
+interface AlertHistoryEntry { level: number; resetsAt: number | null; }
+const alertHistoryKey = "account-limits.alert-history.v1";
+
+/** Persist crossings per window; page reloads do not turn old levels into new alerts. */
+export function createQuotaAlertTracker(storage?: QuotaAlertStorage) {
+  let levels = new Map<string, AlertHistoryEntry>();
+  return (snapshot: AccountLimitsPanelSnapshot): QuotaAlert[] => {
+    // Read again before deciding so another open page's recorded alerts are seen.
+    try {
+      const raw = storage?.getItem(alertHistoryKey);
+      const saved: unknown = raw ? JSON.parse(raw) : null;
+      if (Array.isArray(saved) && saved.every(entry => Array.isArray(entry) && entry.length === 2
+        && typeof entry[0] === "string" && entry[1] !== null && typeof entry[1] === "object"
+        && [0, 1, 2].includes(entry[1].level)
+        && (entry[1].resetsAt === null || typeof entry[1].resetsAt === "number" && Number.isFinite(entry[1].resetsAt)))) {
+        levels = new Map(saved.map(([key, value]) => [key, { level: value.level, resetsAt: value.resetsAt }]));
+      }
+    } catch { /* Unavailable or invalid storage keeps this page's in-memory state. */ }
+    const alerts = quotaAlerts(snapshot).filter(alert => {
+      const previous = levels.get(alert.key);
+      const sameCycle = previous && (previous.resetsAt === null || alert.resetsAt === null || previous.resetsAt === alert.resetsAt);
+      levels.set(alert.key, { level: alert.level, resetsAt: alert.resetsAt ?? previous?.resetsAt ?? null });
+      return alert.level > (sameCycle ? previous.level : 0);
+    });
+    try { storage?.setItem(alertHistoryKey, JSON.stringify([...levels])); }
+    catch { /* The tracker still deduplicates while this page stays open. */ }
+    return alerts;
+  };
 }
 
 /** Cursor subscription allowance and on-demand budget are separate denominators. */

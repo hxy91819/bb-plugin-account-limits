@@ -678,6 +678,41 @@ test("collapsed footer monitoring checks thresholds without duplicate alerts and
   assert.equal(reads, 3);
 });
 
+test("quota reminders survive page re-entry without repeating an unchanged threshold", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-18T00:00:00Z") });
+  const { toast } = await import("sonner");
+  const warnings: string[] = [];
+  t.mock.method(toast, "warning", (message: unknown) => { warnings.push(String(message)); return 1; });
+  let used = 85; let resetsAt = "2026-10-24T00:00:00Z";
+  let overlay: ReturnType<typeof renderSlot> | undefined;
+  t.after(() => { overlay?.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const reenter = async () => {
+    overlay?.lifecycle.unmount();
+    const app = await loadPluginApp(() => import("./app.js"));
+    overlay = renderSlot(app.appOverlays[0]!, {}, { rpc: { readAccountLimits: () => ({ machines: [{
+      id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
+      providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
+        { key: "test", label: "Test account", weight: 1, usage: { status: "ok", planLabel: null, windows: [
+          { id: "weekly", label: "Weekly limit", usedPercent: used, resetsAt },
+        ] } },
+      ] }],
+    }] }) } });
+    await act(async () => { await Promise.resolve(); });
+  };
+  await reenter(); assert.equal(warnings.length, 1);
+  await reenter(); assert.equal(warnings.length, 1);
+  used = 96;
+  await reenter(); assert.equal(warnings.length, 2);
+  await reenter(); assert.equal(warnings.length, 2);
+  used = 20;
+  await reenter(); assert.equal(warnings.length, 2);
+  used = 85;
+  await reenter(); assert.equal(warnings.length, 3);
+  resetsAt = "2026-10-31T00:00:00Z";
+  await reenter(); assert.equal(warnings.length, 4);
+});
+
 test("reminders disabled at startup do not consume thresholds and the monitor never forces disclosure open", async t => {
   installTestPluginRuntime(); dom.window.localStorage.clear();
   dom.window.localStorage.setItem("account-limits.reminders", "false");

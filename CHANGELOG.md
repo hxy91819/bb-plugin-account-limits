@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Persist quota reminder history across page reloads and re-entry; retain higher-threshold and reset-cycle alerts.
+
 - Fix compact service percentages to summarize weighted pools and prioritize weekly budgets, retaining independent model families and unknown total weeks.
 
 - Read existing BB usage-capable providers alongside optional Account Pooler and CLI Proxy sources.

@@ -526,7 +526,10 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
 function QuotaMonitor({ store }: { store: QuotaUiStore }) {
   const { snapshot, refresh } = useQuotaData(store);
   const [reminders] = useQuotaPreference("reminders");
-  const [track] = useState(createQuotaAlertTracker);
+  const [track] = useState(() => {
+    try { return createQuotaAlertTracker(window.localStorage); }
+    catch { return createQuotaAlertTracker(); }
+  });
   useEffect(() => {
     if (!snapshot || !reminders) return;
     const alerts = track(snapshot);
