@@ -248,7 +248,7 @@ test("Cliproxy provider aggregation keeps successful account limits when another
   }
 });
 
-test("Antigravity gets a project before requesting the provider quota summary", async () => {
+test("Antigravity uses the complete production quota summary after daily project discovery", async () => {
   const originalFetch = globalThis.fetch;
   const apiCalls: Array<Record<string, unknown>> = [];
   globalThis.fetch = async (input, init) => {
@@ -259,9 +259,18 @@ test("Antigravity gets a project before requesting the provider quota summary", 
     if (call.url.endsWith(":loadCodeAssist")) {
       return new Response(JSON.stringify({ status_code: 200, body: JSON.stringify({ cloudaicompanionProject: "project-1" }) }), { status: 200 });
     }
-    return new Response(JSON.stringify({ status_code: 200, body: JSON.stringify({ groups: [{ displayName: "Gemini Models", buckets: [
-      { window: "weekly", remainingFraction: 0.5, resetTime: "2026-09-12T10:00:00Z" },
-    ] }] }) }), { status: 200 });
+    // Daily can succeed while silently omitting the entire Gemini family.
+    const partnerGroup = { displayName: "Claude and GPT models", buckets: [
+      { window: "weekly", remainingFraction: 0.7, resetTime: "2026-09-13T10:00:00Z" },
+      { window: "5h", remainingFraction: 0.9, resetTime: "2026-09-09T12:00:00Z" },
+    ] };
+    const groups = call.url === "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary"
+      ? [{ displayName: "Gemini Models", buckets: [
+        { window: "weekly", remainingFraction: 0.5, resetTime: "2026-09-12T10:00:00Z" },
+        { window: "5h", remainingFraction: 0.8, resetTime: "2026-09-09T11:00:00Z" },
+      ] }, partnerGroup]
+      : [partnerGroup];
+    return new Response(JSON.stringify({ status_code: 200, body: JSON.stringify({ groups }) }), { status: 200 });
   };
   try {
     const result = await readCliproxyUsage({ provider: "antigravity", authIndex: "account-1", label: "Gemini · 账号 1" }, {
@@ -269,11 +278,14 @@ test("Antigravity gets a project before requesting the provider quota summary", 
     });
     assert.ok(result.supported && result.usage.status === "ok");
     assert.deepEqual(result.usage.windows, [
+      { label: "Gemini Models: 5-hour limit", usedPercent: 20, resetsAt: "2026-09-09T11:00:00.000Z" },
       { label: "Gemini Models: Weekly limit", usedPercent: 50, resetsAt: "2026-09-12T10:00:00.000Z" },
+      { label: "Claude and GPT models: 5-hour limit", usedPercent: 10, resetsAt: "2026-09-09T12:00:00.000Z" },
+      { label: "Claude and GPT models: Weekly limit", usedPercent: 30, resetsAt: "2026-09-13T10:00:00.000Z" },
     ]);
     assert.equal(apiCalls.length, 2);
     assert.match(String(apiCalls[0].url), /daily-cloudcode-pa\.googleapis\.com\/v1internal:loadCodeAssist$/);
-    assert.match(String(apiCalls[1].url), /daily-cloudcode-pa\.googleapis\.com\/v1internal:retrieveUserQuotaSummary$/);
+    assert.equal(apiCalls[1].url, "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary");
     assert.deepEqual(JSON.parse(String(apiCalls[1].data)), { project: "project-1" });
   } finally {
     globalThis.fetch = originalFetch;

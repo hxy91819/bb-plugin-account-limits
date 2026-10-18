@@ -27,7 +27,7 @@ Requires a BB build supporting Plugin SDK **0.6.37** or newer (including public 
 Install the stable Git release:
 
 ```sh
-bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@v0.3.3' --yes
+bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@v0.3.4' --yes
 ```
 
 Or download the prebuilt `.tgz` and checksums from [Releases](https://github.com/hxy91819/bb-plugin-account-limits/releases), verify the SHA-256, then:

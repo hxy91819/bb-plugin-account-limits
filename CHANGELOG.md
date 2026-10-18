@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.4 - 2026-10-18
+
+- Read Antigravity quotas from the production summary endpoint to restore Gemini weekly and 5-hour windows alongside Claude/GPT.
+- Keep daily project/plan discovery, separate family windows and the existing request count.
+
 ## 0.3.3 - 2026-10-17
 
 - Show the nearest weekly reset batch with individual remaining, exhausted or 5h-restricted states.

@@ -517,7 +517,9 @@ async function readAntigravityUsageThroughCliproxy(
   const planLabel = asString(asRecord(loadBody?.paidTier)?.name) ?? asString(asRecord(loadBody?.currentTier)?.name);
   const quota = await callCliproxyApi(managementBaseUrl, managementKey, authIndex, {
     method: "POST",
-    url: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+    // Daily may return HTTP 200 with only the Claude/GPT family. The production
+    // summary reports both families; keep daily for project/plan discovery only.
+    url: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
     header,
     data: JSON.stringify({ project }),
   }, signal, timeoutMs);
