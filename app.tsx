@@ -4,7 +4,7 @@ import { definePluginApp, experimental_Icon as BbIcon, useBbNavigate } from "@ge
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
 import { aggregateCliproxyPool, groupAccountPools, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
 import { AntigravityIcon, GrokIcon } from "./provider-icons.js";
-import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, cursorQuotaSummaries, quotaWindowDisplayLabel, type QuotaUiStore } from "./quota-presentation.js";
+import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, quotaWindowDisplayLabel, type QuotaUiStore } from "./quota-presentation.js";
 import { useQuotaData, useQuotaPreference, useQuotaChoicePreference } from "./quota-ui.js";
 import { panelStyles } from "./panel-styles.js";
 import { buildPoolRecovery, type PoolRecovery } from "./pool-recovery.js";
@@ -492,22 +492,17 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
     {error && <p role="alert" className="limits-alert">{error}</p>}
     {entries.length > 0 && <div className="limits-compact-services" aria-label="额度服务">
       {entries.map(entry => {
-        const windows = entry.provider.accounts.flatMap(account => account.usage.status === "ok" ? account.usage.windows : []);
-        const used = windows.length ? Math.max(...windows.map(window => window.usedPercent)) : null;
-        const paceWarning = entry.provider.accounts.some(account => accountWindows(account, now, entry.provider.updatedAt)
-          .some(window => window.pace?.level === "conserve" || window.pace?.level === "blocked"));
-        const tone = used === null ? "unknown" : used >= 95 ? "critical" : used >= 80 || paceWarning ? "warning" : "normal";
-        const percent = used === null ? null : mode === "used" ? used : 100 - used;
-        const name = entry.provider.displayName.replace(" (SDK)", "").replace(" · ", " ");
-        const separate = cursorQuotaSummaries(entry.provider).map(metric => ({ ...metric,
-          percent: Math.round(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent),
-          tone: metric.usedPercent >= 95 ? "critical" : metric.usedPercent >= 80 ? "warning" : "normal",
+        const metrics = compactPoolSummaries(entry.provider, now).map(metric => ({ ...metric,
+          percent: metric.usedPercent === null ? null : Math.round(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent),
+          tone: metric.usedPercent === null ? "unknown" : metric.usedPercent >= 95 ? "critical" : metric.usedPercent >= 80 || metric.paceWarning ? "warning" : "normal",
         }));
-        const separateLabel = separate.map(metric => `${metric.label}${mode === "used" ? "已用" : "剩余"} ${metric.percent}%`).join("，");
-        return <button type="button" key={entry.key} className="limits-compact-service" data-tone={separate.length ? "normal" : tone} aria-pressed={entry.key === active?.key}
+        const name = entry.provider.displayName.replace(" (SDK)", "").replace(" · ", " ");
+        const summary = metrics.map(metric => `${metrics.length === 1 ? metric.fullLabel : metric.label}${metric.percent === null ? " —" : `${mode === "used" ? "已用" : "剩余"} ${metric.percent}%`}`).join("，");
+        const detail = metrics.map(metric => `${metric.fullLabel} · ${metric.detail}`).join("；");
+        return <button type="button" key={entry.key} className="limits-compact-service" data-tone={metrics.length === 1 ? metrics[0]!.tone : "normal"} aria-pressed={entry.key === active?.key}
           aria-label={entry.provider.displayName}
-          title={`${entry.machine.displayName} · ${sourceNames[entry.machine.source ?? "cliproxy"]}${separate.length ? ` · ${separateLabel}（各项分别统计）` : used === null ? "" : ` · 最紧窗口${mode === "used" ? "已用" : "剩余"} ${Math.round(percent!)}%`}`}
-          onClick={() => setSelected(entry.key)}><span className="limits-compact-service-name">{name}</span>{separate.length ? <span className="limits-compact-service-metrics">{separate.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label}</span><strong>{metric.percent}%</strong></span>)}</span> : <span className="limits-compact-service-value">{percent === null ? "—" : `${Math.round(percent)}%`}</span>}</button>;
+          title={`${entry.machine.displayName} · ${sourceNames[entry.machine.source ?? "cliproxy"]}${summary ? ` · ${summary}（池汇总，各项分别统计） · ${detail}` : ""}`}
+          onClick={() => setSelected(entry.key)}><span className="limits-compact-service-name">{name}</span>{metrics.length > 1 ? <span className="limits-compact-service-metrics">{metrics.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label}</span><strong>{metric.percent === null ? "—" : `${metric.percent}%`}</strong></span>)}</span> : <span className="limits-compact-service-value">{metrics[0]?.percent === undefined || metrics[0].percent === null ? "—" : `${metrics[0].percent}%`}</span>}</button>;
       })}
     </div>}
     <div className="limits-compact-body">

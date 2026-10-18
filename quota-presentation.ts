@@ -1,4 +1,6 @@
-import type { AccountLimitsPanelSnapshot, AccountLimitsReadInput } from "./contract.js";
+import type { AccountLimitsPanelSnapshot, AccountLimitsReadInput, QuotaAccount } from "./contract.js";
+import { aggregateCliproxyPool, groupAccountPools, type PoolWindow } from "./pool.js";
+import { buildWeeklyPace, isWeeklyBudget } from "./weekly-pace.js";
 
 /** Pool precedence affects presentation and reminders only; raw observations stay intact. */
 function preferCodexPool(snapshot: AccountLimitsPanelSnapshot): AccountLimitsPanelSnapshot {
@@ -109,12 +111,50 @@ export function quotaWindowDisplayLabel(providerId: string, label: string): stri
   return undefined;
 }
 
-export function cursorQuotaSummaries(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number]) {
-  const windows = provider.accounts.length
-    ? provider.accounts.flatMap(account => account.usage.status === "ok" ? account.usage.windows : [])
-    : provider.usage.status === "ok" ? provider.usage.windows : [];
-  return ([{ key: "plan", label: "套餐", fullLabel: "套餐额度" }, { key: "on-demand", label: "按量", fullLabel: "按量预算" }] as const).flatMap(metric => {
-    const matches = windows.filter(window => quotaWindowDisplayLabel(provider.id, window.label) === metric.fullLabel);
-    return matches.length ? [{ ...metric, usedPercent: Math.max(...matches.map(window => window.usedPercent)) }] : [];
+export interface CompactPoolSummary {
+  key: string;
+  label: string;
+  fullLabel: string;
+  usedPercent: number | null;
+  detail: string;
+  paceWarning: boolean;
+}
+
+/** Service cards always describe a pool, independent of the expanded account view. */
+export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number], now: number): CompactPoolSummary[] {
+  const legacy = new Map<string, QuotaAccount>();
+  if (!provider.accounts.length && provider.usage.status === "ok") {
+    for (const window of provider.usage.windows) {
+      const key = window.accountLabel ?? "provider";
+      let account = legacy.get(key);
+      if (!account) {
+        account = { key, label: key, weight: 1, usage: { status: "ok", planLabel: provider.usage.planLabel, windows: [] } };
+        legacy.set(key, account);
+      }
+      const prefix = window.accountLabel ? `${window.accountLabel} · ` : "";
+      if (account.usage.status === "ok") account.usage.windows.push({ ...window,
+        label: prefix && window.label.startsWith(prefix) ? window.label.slice(prefix.length) : window.label });
+    }
+  }
+  const accounts = provider.accounts.length ? provider.accounts : [...legacy.values()];
+  return groupAccountPools(provider.id, accounts).flatMap<CompactPoolSummary>(group => {
+    if (group.id === "without-weekly") return [{ key: group.id, label: "周未报", fullLabel: "总周额度未返回", usedPercent: null,
+      detail: `${group.accounts.length} 个账号未返回总周额度，独立统计`, paceWarning: false }];
+    const pool = aggregateCliproxyPool(group.accounts);
+    if (pool.status !== "ok" || !pool.windows.length) return [];
+    const weekly = pool.windows.filter(window => isWeeklyBudget(window.label));
+    const cursor = pool.windows.filter(window => quotaWindowDisplayLabel(provider.id, window.label) !== undefined);
+    const tightest = pool.windows.reduce((a, b) => a.usedPercent >= b.usedPercent ? a : b);
+    const selected = cursor.length ? cursor : weekly.length ? weekly : [tightest];
+    return selected.map((window: PoolWindow) => {
+      const cursorLabel = quotaWindowDisplayLabel(provider.id, window.label);
+      const label = cursorLabel === "套餐额度" ? "套餐" : cursorLabel === "按量预算" ? "按量"
+        : window.label === "7d" ? "周" : window.label.replace(/ 7d$/u, "周");
+      const fullLabel = cursorLabel ? `池${cursorLabel}` : isWeeklyBudget(window.label) ? `${label === "周" ? "" : label.replace(/周$/u, " ")}池周额度` : `池 ${window.label}`;
+      const pace = isWeeklyBudget(window.label) ? buildWeeklyPace(group.accounts, window.id, now, provider.updatedAt) : null;
+      return { key: `${group.id}:${window.id}`, label, fullLabel, usedPercent: window.usedPercent,
+        detail: `覆盖 ${window.accounts}/${pool.totalAccounts}${group.label ? ` · ${group.label}` : ""}`,
+        paceWarning: pace?.level === "conserve" || pace?.level === "blocked" };
+    });
   });
 }

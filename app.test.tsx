@@ -740,6 +740,41 @@ test("hidden windows pause periodic reads; visibility and focus resume once and 
   assert.equal(reads, 3);
 });
 
+test("compact service cards show the weighted pool week instead of the worst account", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.view", "pool");
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+  let reads = 0;
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "pool", source: "account-pool", displayName: "Pool", status: "connected", error: null,
+    providers: [{ id: "account-pool:codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
+      { key: "empty", label: "Empty", weight: 1, usage: { status: "ok", planLabel: null, windows: [
+        { id: "week", label: "Weekly limit", usedPercent: 100, resetsAt: null },
+        { id: "session", label: "5-hour limit", usedPercent: 100, resetsAt: null },
+      ] } },
+      { key: "full", label: "Full", weight: 3, usage: { status: "ok", planLabel: null, windows: [
+        { id: "week", label: "Weekly limit", usedPercent: 0, resetsAt: null },
+        { id: "session", label: "5-hour limit", usedPercent: 100, resetsAt: null },
+      ] } },
+    ] }] }] };
+  const rpc = { readAccountLimits: () => { reads++; return snapshot; } };
+  const compact = renderSlot(footer, { dismiss() {} }, { rpc });
+  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const card = await compact.findByRole("button", { name: "Codex" });
+  assert.equal(card.querySelector(".limits-compact-service-value")?.textContent, "75%");
+  assert.match(card.title, /池.*周.*剩余 75%/u);
+  assert.equal(card.getAttribute("data-tone"), "normal");
+  assert.equal(within(compact.container).getByRole("progressbar", { name: "7d 剩余额度" }).getAttribute("aria-valuenow"), "75");
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
+  t.after(() => full.lifecycle.unmount());
+  await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
+  assert.equal(card.querySelector(".limits-compact-service-value")?.textContent, "25%");
+  await act(async () => { within(full.container).getByRole("button", { name: "账号" }).click(); });
+  assert.equal(card.querySelector(".limits-compact-service-value")?.textContent, "25%");
+  assert.equal(reads, 1);
+});
+
 test("Cursor shows subscription and on-demand budgets separately and follows the shared display mode", async t => {
   installTestPluginRuntime(); dom.window.localStorage.clear();
   const app = await loadPluginApp(() => import("./app.js"));

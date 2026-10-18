@@ -49,6 +49,8 @@ bb plugin install 'git:https://github.com/hxy91819/bb-plugin-account-limits.git@
 
 该插件不统计对话 token 或预估 API 费用，也不注册可执行 Agent；这些由 BB Usage 和相应 Provider 负责。旧本机工具中的可选 ACP 启动器不属于本开源版，如使用过，需要单独配置。
 
+快捷菜单顶部的服务百分比始终汇总账号池，沿用完整面板的容量权重，优先显示总周额度。单个账号耗尽、5h 限制或模型上限不会替代已报告的总周；不同模型组分别显示，缺总周账号显示“周未报”，悬停可见覆盖率。展开明细仍跟随账号/池选择。
+
 详见英文 README、[架构](architecture.md)和[算法](../weekly-pace.md)。
 
 账号池有可用 Codex 额度时，精简面板、详情页和额度提醒优先使用账号池，隐藏原生 Codex 重复项；池不可用时回退到原生账户。Cursor SDK 等其他服务仍同时展示。此规则不改变 provider 开关、路由或原始观测。

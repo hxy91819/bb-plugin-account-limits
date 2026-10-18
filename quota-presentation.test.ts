@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, cursorQuotaSummaries } from "./quota-presentation.js";
+import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries } from "./quota-presentation.js";
 import type { AccountLimitsPanelSnapshot } from "./contract.js";
 
 const snapshot = (usedPercent = 85): AccountLimitsPanelSnapshot => ({ machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
@@ -65,7 +65,7 @@ test("Cursor budget summaries and threshold reminders retain independent identit
     { label: "Plan usage", usedPercent: 23, resetsAt: null },
     { label: "On-demand spend", usedPercent: 81, resetsAt: null },
   ] } }];
-  assert.deepEqual(cursorQuotaSummaries(provider).map(metric => [metric.label, metric.usedPercent]), [["套餐", 23], ["按量", 81]]);
+  assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => [metric.label, metric.usedPercent]), [["套餐", 23], ["按量", 81]]);
   const track = createQuotaAlertTracker();
   const alerts = track(data);
   assert.equal(alerts.length, 1);
@@ -78,7 +78,7 @@ test("Cursor budget summaries and threshold reminders retain independent identit
   assert.equal(planAlerts.length, 1);
   assert.match(planAlerts[0]!.title, /套餐额度 已用 95%/u);
   usage.windows.pop();
-  assert.deepEqual(cursorQuotaSummaries(provider).map(metric => metric.label), ["套餐"]);
+  assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => metric.label), ["套餐"]);
 });
 
 const withCodexPool = () => {
@@ -116,4 +116,61 @@ test("native Codex remains a fallback for unavailable, cached, empty or non-Code
     if (kind === "claude") pool.providers[0]!.id = "account-pool:claude-code";
     for (const hideFailures of [true, false]) assert(visibleQuota(data, hideFailures)!.machines[0]!.providers.some(provider => provider.id === "codex"), kind);
   }
+});
+
+
+test("compact Claude pools keep unknown weeks and model caps outside the measured all-model week", () => {
+  const data = snapshot(); const provider = data.machines[0]!.providers[0]!;
+  provider.id = "cliproxy-claude";
+  const make = (key: string, weight: number, weekly: number | null) => ({ key, label: key, weight,
+    usage: { status: "ok" as const, planLabel: null, windows: [
+      ...(weekly === null ? [] : [{ label: "Weekly limit", usedPercent: weekly, resetsAt: null }]),
+      { label: "5-hour limit", usedPercent: 100, resetsAt: null },
+      { label: "Weekly scoped limit", usedPercent: 100, resetsAt: null },
+    ] } });
+  provider.accounts = [make("empty", 1, 100), make("full", 3, 0), make("unknown-team", 100, null)];
+  const raw = structuredClone(provider);
+  const summaries = compactPoolSummaries(provider, Date.now());
+  assert.deepEqual(summaries.map(metric => [metric.label, metric.usedPercent]), [["周", 25], ["周未报", null]]);
+  assert.match(summaries[0]!.detail, /覆盖 2\/2/u);
+  assert.match(summaries[1]!.detail, /1 个账号未返回总周额度/u);
+  assert.deepEqual(provider, raw);
+  provider.accounts = [make("only-unknown", 1, null)];
+  assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => metric.usedPercent), [null]);
+});
+
+test("compact model-family weeks and Cursor budgets use independent weighted pool denominators", () => {
+  const provider = snapshot().machines[0]!.providers[0]!;
+  provider.id = "cliproxy-antigravity";
+  const make = (key: string, weight: number, gem: number, partner: number) => ({ key, label: key, weight,
+    usage: { status: "ok" as const, planLabel: null, windows: [
+      { label: "Gemini Models: Weekly limit", usedPercent: gem, resetsAt: null },
+      { label: "Claude and GPT models: Weekly limit", usedPercent: partner, resetsAt: null },
+      { label: "Gemini Models: 5-hour limit", usedPercent: 100, resetsAt: null },
+    ] } });
+  provider.accounts = [make("a", 1, 100, 10), make("b", 3, 0, 90)];
+  assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => [metric.label, metric.usedPercent]), [["Gem周", 25], ["C/G周", 70]]);
+  provider.id = "acp-cursor-sdk";
+  for (const account of provider.accounts) if (account.usage.status === "ok") {
+    account.usage.windows[0]!.label = "Plan usage";
+    account.usage.windows[1]!.label = "On-demand spend";
+    account.usage.windows.pop();
+  }
+  assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => [metric.label, metric.usedPercent]), [["套餐", 25], ["按量", 70]]);
+});
+
+test("compact pools preserve legacy account grouping, short-window fallback and empty failures", () => {
+  const provider = snapshot().machines[0]!.providers[0]!;
+  provider.accounts = [];
+  provider.usage = { status: "ok", planLabel: null, windows: [
+    { accountLabel: "A", label: "A · Weekly limit", usedPercent: 100, resetsAt: null },
+    { accountLabel: "B", label: "B · Weekly limit", usedPercent: 0, resetsAt: null },
+  ] };
+  assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => metric.usedPercent), [50]);
+  provider.usage.windows = provider.usage.windows.map(window => ({ ...window, label: window.label.replace("Weekly limit", "5-hour limit") }));
+  const short = compactPoolSummaries(provider, Date.now());
+  assert.equal(short[0]!.usedPercent, 50);
+  assert.equal(short[0]!.fullLabel, "池 5h");
+  provider.usage = { status: "error", message: "Unavailable" };
+  assert.deepEqual(compactPoolSummaries(provider, Date.now()), []);
 });

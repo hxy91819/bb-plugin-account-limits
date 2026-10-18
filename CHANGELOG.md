@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Fix compact service percentages to summarize weighted pools and prioritize weekly budgets, retaining independent model families and unknown total weeks.
+
 - Read existing BB usage-capable providers alongside optional Account Pooler and CLI Proxy sources.
 - Add a compact sidebar footer with shared used/remaining and account/pool preferences, default failure hiding, and 80%/95% reminders at the top right.
 - Show Cursor subscription and on-demand budgets separately, and prefer usable pooled Codex quotas over duplicate native entries.
