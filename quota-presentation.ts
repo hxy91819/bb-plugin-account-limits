@@ -150,6 +150,8 @@ export interface CompactPoolSummary {
   usedPercent: number | null;
   detail: string;
   paceWarning: boolean;
+  /** Only reporting accounts enter the denominator; missing observations are excluded. */
+  partial: boolean;
 }
 
 /** Service cards always describe a pool, independent of the expanded account view. */
@@ -169,9 +171,13 @@ export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machi
     }
   }
   const accounts = provider.accounts.length ? provider.accounts : [...legacy.values()];
-  return groupAccountPools(provider.id, accounts).flatMap<CompactPoolSummary>(group => {
-    if (group.id === "without-weekly") return [{ key: group.id, label: "周未报", fullLabel: "总周额度未返回", usedPercent: null,
-      detail: `${group.accounts.length} 个账号未返回总周额度，独立统计`, paceWarning: false }];
+  const groups = groupAccountPools(provider.id, accounts);
+  const missingWeekly = groups.find(group => group.id === "without-weekly")?.accounts.length ?? 0;
+  const hasReportedWeek = groups.some(group => group.id !== "without-weekly" && group.accounts.some(account =>
+    account.usage.status === "ok" && account.usage.windows.some(window => isWeeklyBudget(window.label))));
+  return groups.flatMap<CompactPoolSummary>(group => {
+    if (group.id === "without-weekly") return hasReportedWeek ? [] : [{ key: group.id, label: "周未报", fullLabel: "总周额度未返回", usedPercent: null,
+      detail: `${group.accounts.length} 个账号未返回总周额度，独立统计`, paceWarning: false, partial: false }];
     const pool = aggregateCliproxyPool(group.accounts);
     if (pool.status !== "ok" || !pool.windows.length) return [];
     const weekly = pool.windows.filter(window => isWeeklyBudget(window.label));
@@ -184,8 +190,9 @@ export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machi
         : window.label === "7d" ? "周" : window.label.replace(/ 7d$/u, "周");
       const fullLabel = cursorLabel ? `池${cursorLabel}` : isWeeklyBudget(window.label) ? `${label === "周" ? "" : label.replace(/周$/u, " ")}池周额度` : `池 ${window.label}`;
       const pace = isWeeklyBudget(window.label) ? buildWeeklyPace(group.accounts, window.id, now, provider.updatedAt) : null;
-      return { key: `${group.id}:${window.id}`, label, fullLabel, usedPercent: window.usedPercent,
-        detail: `覆盖 ${window.accounts}/${pool.totalAccounts}${group.label ? ` · ${group.label}` : ""}`,
+      const partial = window.accounts < accounts.length;
+      return { key: `${group.id}:${window.id}`, label, fullLabel, usedPercent: window.usedPercent, partial,
+        detail: `覆盖 ${window.accounts}/${accounts.length}${group.label ? ` · ${group.label}` : ""}${missingWeekly && isWeeklyBudget(window.label) ? ` · ${missingWeekly} 个账号未返回总周额度` : ""}${partial ? " · * 仅统计已返回该窗口的账号，不代表全池额度" : ""}`,
         paceWarning: pace?.level === "conserve" || pace?.level === "blocked" };
     });
   });

@@ -131,12 +131,20 @@ test("compact Claude pools keep unknown weeks and model caps outside the measure
   provider.accounts = [make("empty", 1, 100), make("full", 3, 0), make("unknown-team", 100, null)];
   const raw = structuredClone(provider);
   const summaries = compactPoolSummaries(provider, Date.now());
-  assert.deepEqual(summaries.map(metric => [metric.label, metric.usedPercent]), [["周", 25], ["周未报", null]]);
-  assert.match(summaries[0]!.detail, /覆盖 2\/2/u);
-  assert.match(summaries[1]!.detail, /1 个账号未返回总周额度/u);
+  assert.deepEqual(summaries.map(metric => [metric.label, metric.usedPercent]), [["周", 25]]);
+  assert.equal(summaries[0]!.partial, true);
+  assert.match(summaries[0]!.detail, /覆盖 2\/3/u);
+  assert.match(summaries[0]!.detail, /1 个账号未返回总周额度/u);
   assert.deepEqual(provider, raw);
+  for (const id of ["claude", "claude-code", "cliproxy-claude", "account-pool:claude-code"]) {
+    provider.id = id;
+    assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => [metric.usedPercent, metric.partial]), [[25, true]]);
+  }
+  provider.accounts = [make("full", 3, 0), { key: "failed", label: "Failed", weight: 100,
+    usage: { status: "error", message: "Unavailable" } }];
+  assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => [metric.usedPercent, metric.partial]), [[0, true]]);
   provider.accounts = [make("only-unknown", 1, null)];
-  assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => metric.usedPercent), [null]);
+  assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => [metric.usedPercent, metric.partial]), [[null, false]]);
 });
 
 test("compact model-family weeks and Cursor budgets use independent weighted pool denominators", () => {

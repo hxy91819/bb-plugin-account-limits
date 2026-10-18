@@ -810,6 +810,45 @@ test("compact service cards show the weighted pool week instead of the worst acc
   assert.equal(reads, 1);
 });
 
+test("compact Claude card shows the measurable weighted week with an explicit partial-data marker", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+  const make = (key: string, weight: number, weekly: number | null) => ({ key, label: key, weight,
+    usage: { status: "ok" as const, planLabel: null, windows: [
+      ...(weekly === null ? [] : [{ label: "Weekly limit", usedPercent: weekly, resetsAt: null }]),
+      { label: "5-hour limit", usedPercent: 100, resetsAt: null },
+      { label: "Weekly scoped limit", usedPercent: 100, resetsAt: null },
+    ] } });
+  const provider = { id: "cliproxy-claude", displayName: "Claude", updatedAt: null,
+    usage: { status: "ok" as const, planLabel: null, windows: [] },
+    accounts: [make("Empty", 1, 100), make("Full", 3, 0), make("Team", 100, null)] };
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", source: "cliproxy", displayName: "Proxy",
+    status: "connected", error: null, providers: [provider] }] };
+  const compact = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const card = await compact.findByRole("button", { name: "Claude" });
+  const value = () => card.querySelector(".limits-compact-service-value")?.textContent;
+  assert.equal(value(), "75%*");
+  assert.match(card.title, /覆盖 2\/3/u);
+  assert.match(card.title, /1 个账号未返回总周额度/u);
+  assert.match(card.title, /\*.*仅统计已返回.*不代表全池/u);
+  assert.equal(card.querySelector(".limits-compact-service-metrics"), null);
+  assert.ok(within(compact.container).getByText("总周额度未返回"));
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => full.lifecycle.unmount());
+  await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
+  assert.equal(value(), "25%*");
+  provider.accounts = provider.accounts.slice(0, 2);
+  await act(async () => { compact.getByRole("button", { name: "刷新精简额度" }).click(); });
+  assert.equal(value(), "25%");
+  provider.accounts = [make("Team", 100, null)];
+  await act(async () => { compact.getByRole("button", { name: "刷新精简额度" }).click(); });
+  assert.equal(value(), "—");
+  assert.doesNotMatch(card.title, /\*/u);
+});
+
 test("Cursor shows subscription and on-demand budgets separately and follows the shared display mode", async t => {
   installTestPluginRuntime(); dom.window.localStorage.clear();
   const app = await loadPluginApp(() => import("./app.js"));

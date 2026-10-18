@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Show measurable Claude weekly quota with a partial-coverage asterisk in compact cards; keep wholly missing weeks unknown and details separately pooled.
+
 - Persist quota reminder history across page reloads and re-entry; retain higher-threshold and reset-cycle alerts.
 
 - Fix compact service percentages to summarize weighted pools and prioritize weekly budgets, retaining independent model families and unknown total weeks.

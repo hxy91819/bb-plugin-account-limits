@@ -497,12 +497,12 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
           tone: metric.usedPercent === null ? "unknown" : metric.usedPercent >= 95 ? "critical" : metric.usedPercent >= 80 || metric.paceWarning ? "warning" : "normal",
         }));
         const name = entry.provider.displayName.replace(" (SDK)", "").replace(" · ", " ");
-        const summary = metrics.map(metric => `${metrics.length === 1 ? metric.fullLabel : metric.label}${metric.percent === null ? " —" : `${mode === "used" ? "已用" : "剩余"} ${metric.percent}%`}`).join("，");
+        const summary = metrics.map(metric => `${metrics.length === 1 ? metric.fullLabel : metric.label}${metric.percent === null ? " —" : `${mode === "used" ? "已用" : "剩余"} ${metric.percent}%${metric.partial ? "*" : ""}`}`).join("，");
         const detail = metrics.map(metric => `${metric.fullLabel} · ${metric.detail}`).join("；");
         return <button type="button" key={entry.key} className="limits-compact-service" data-tone={metrics.length === 1 ? metrics[0]!.tone : "normal"} aria-pressed={entry.key === active?.key}
           aria-label={entry.provider.displayName}
           title={`${entry.machine.displayName} · ${sourceNames[entry.machine.source ?? "cliproxy"]}${summary ? ` · ${summary}（池汇总，各项分别统计） · ${detail}` : ""}`}
-          onClick={() => setSelected(entry.key)}><span className="limits-compact-service-name">{name}</span>{metrics.length > 1 ? <span className="limits-compact-service-metrics">{metrics.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label}</span><strong>{metric.percent === null ? "—" : `${metric.percent}%`}</strong></span>)}</span> : <span className="limits-compact-service-value">{metrics[0]?.percent === undefined || metrics[0].percent === null ? "—" : `${metrics[0].percent}%`}</span>}</button>;
+          onClick={() => setSelected(entry.key)}><span className="limits-compact-service-name">{name}</span>{metrics.length > 1 ? <span className="limits-compact-service-metrics">{metrics.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label}</span><strong>{metric.percent === null ? "—" : `${metric.percent}%${metric.partial ? "*" : ""}`}</strong></span>)}</span> : <span className="limits-compact-service-value">{metrics[0]?.percent === undefined || metrics[0].percent === null ? "—" : `${metrics[0].percent}%${metrics[0].partial ? "*" : ""}`}</span>}</button>;
       })}
     </div>}
     <div className="limits-compact-body">
