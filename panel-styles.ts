@@ -5,6 +5,7 @@ export const panelStyles = `
   --limits-soft: color-mix(in srgb, var(--muted) 35%, var(--card));
   --limits-hover: color-mix(in srgb, var(--primary) 3%, var(--card));
   --limits-fill: color-mix(in srgb, var(--primary) 85%, var(--foreground));
+  --limits-success-text: color-mix(in srgb, var(--success) 75%, var(--foreground));
   --limits-danger-text: color-mix(in srgb, var(--destructive) 85%, var(--foreground));
   height: 100%; overflow: auto; container: limits / inline-size;
   color: var(--foreground); background: var(--background);
@@ -81,13 +82,15 @@ export const panelStyles = `
 .limits-panel .limits-meter-title { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 7px; min-width: 0; }
 .limits-panel .limits-meter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted-foreground); }
 .limits-panel .limits-pace { display: inline-flex; flex-shrink: 0; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--limits-line); color: var(--muted-foreground); background: var(--limits-soft); font-size: 10px; line-height: 1.5; font-weight: 500; }
-.limits-panel .limits-pace[data-level=generous] { color: color-mix(in srgb, var(--primary) 60%, var(--foreground)); border-color: color-mix(in srgb, var(--primary) 20%, var(--card)); background: color-mix(in srgb, var(--primary) 7%, var(--card)); }
+.limits-panel .limits-pace[data-level=generous] { color: var(--limits-success-text); border-color: color-mix(in srgb, var(--success) 30%, var(--card)); background: color-mix(in srgb, var(--success) 9%, var(--card)); }
 .limits-panel .limits-pace[data-level=conserve], .limits-panel .limits-pace[data-level=blocked] { color: var(--warning-text); border-color: color-mix(in srgb, var(--warning) 35%, var(--card)); background: color-mix(in srgb, var(--warning) 12%, var(--card)); }
 .limits-panel .limits-pace[data-level=exhausted] { color: var(--limits-danger-text); border-color: color-mix(in srgb, var(--destructive) 20%, var(--card)); background: color-mix(in srgb, var(--destructive) 5%, var(--card)); }
 .limits-panel .limits-pace[data-level=unknown] { border-style: dashed; background: transparent; }
 .limits-panel .limits-meter-number { font-size: 17px; font-weight: 550; letter-spacing: -.04em; line-height: 1.1; font-variant-numeric: tabular-nums; flex-shrink: 0; }
 .limits-panel .limits-meter-track { height: 4px; overflow: hidden; border-radius: 9px; background: color-mix(in srgb, var(--muted) 70%, var(--card)); }
 .limits-panel .limits-meter-fill { height: 100%; border-radius: inherit; background: var(--limits-fill); transition: width .3s ease; }
+.limits-panel .limits-meter[data-pace=generous] { --limits-fill: var(--success); }
+.limits-panel .limits-meter[data-pace=generous] .limits-meter-number { color: var(--limits-success-text); }
 .limits-panel .limits-meter[data-pace=conserve], .limits-panel .limits-meter[data-pace=blocked] { --limits-fill: var(--warning); }
 .limits-panel .limits-meter[data-pace=conserve] .limits-meter-number, .limits-panel .limits-meter[data-pace=blocked] .limits-meter-number { color: var(--warning-text); }
 .limits-panel .limits-meter[data-pace=exhausted] { --limits-fill: var(--destructive); }
@@ -215,6 +218,7 @@ export const panelStyles = `
 .limits-compact .limits-compact-service-metric strong { padding-bottom: 1px; font-size: 11px; line-height: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .limits-compact .limits-compact-service[aria-pressed=true] { color: var(--foreground); background: var(--background); border-color: var(--border); box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 4%, transparent); }
 .limits-compact .limits-compact-service:hover { color: var(--foreground); }
+.limits-compact .limits-compact-service[data-tone=generous] .limits-compact-service-value, .limits-compact .limits-compact-service-metric[data-tone=generous] strong { color: var(--limits-success-text); }
 .limits-compact .limits-compact-service[data-tone=warning] .limits-compact-service-value, .limits-compact .limits-compact-service-metric[data-tone=warning] strong { color: var(--warning-text); }
 .limits-compact .limits-compact-service[data-tone=critical] .limits-compact-service-value, .limits-compact .limits-compact-service-metric[data-tone=critical] strong { color: var(--destructive); }
 .limits-compact .limits-compact-body { min-width: 0; padding: 0 12px 12px; }

@@ -810,6 +810,48 @@ test("compact service cards show the weighted pool week instead of the worst acc
   assert.equal(reads, 1);
 });
 
+test("Gemini generous pace is colored independently from Claude/GPT in compact cards and meters", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.view", "pool");
+  const now = Date.parse("2026-10-18T10:00:00Z");
+  t.mock.timers.enable({ apis: ["Date"], now });
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+  const provider = { id: "cliproxy-antigravity", displayName: "Gemini", updatedAt: new Date(now).toISOString(),
+    usage: { status: "ok" as const, planLabel: null, windows: [] }, accounts: [
+      { key: "a", label: "Example", weight: 1, usage: { status: "ok" as const, planLabel: null, windows: [
+        { label: "Gemini Models: Weekly limit", usedPercent: 50, resetsAt: new Date(now + 24 * 3600_000).toISOString() },
+        { label: "Claude and GPT models: Weekly limit", usedPercent: 80, resetsAt: new Date(now + 144 * 3600_000).toISOString() },
+        { label: "Gemini Models: 5-hour limit", usedPercent: 0, resetsAt: new Date(now + 3600_000).toISOString() },
+        { label: "Claude and GPT models: 5-hour limit", usedPercent: 0, resetsAt: new Date(now + 3600_000).toISOString() },
+      ] } },
+    ] };
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", source: "cliproxy", displayName: "Proxy",
+    status: "connected", error: null, providers: [provider] }] };
+  const compact = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const card = await compact.findByRole("button", { name: "Gemini" });
+  const metrics = card.querySelectorAll(".limits-compact-service-metric");
+  assert.equal(metrics[0]!.getAttribute("data-tone"), "generous");
+  assert.equal(metrics[1]!.getAttribute("data-tone"), "warning");
+  assert.match(card.title, /Gem.*可多用/u);
+  assert.match(card.title, /C\/G.*节约用/u);
+  assert.ok(within(compact.container).getByRole("note", { name: /^周额度建议：可多用/u }));
+  assert.ok(compact.container.querySelector('.limits-meter[data-pace="generous"]'));
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => full.lifecycle.unmount());
+  await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
+  assert.equal(metrics[0]!.getAttribute("data-tone"), "generous");
+  provider.accounts[0]!.usage.windows[0]!.usedPercent = 80;
+  provider.accounts[0]!.usage.windows[0]!.resetsAt = new Date(now + 3600_000).toISOString();
+  await act(async () => { compact.getByRole("button", { name: "刷新精简额度" }).click(); });
+  assert.equal(metrics[0]!.getAttribute("data-tone"), "generous");
+  provider.accounts[0]!.usage.windows[2]!.usedPercent = 100;
+  await act(async () => { compact.getByRole("button", { name: "刷新精简额度" }).click(); });
+  assert.equal(metrics[0]!.getAttribute("data-tone"), "warning");
+});
+
 test("compact Claude card shows the measurable weighted week with an explicit partial-data marker", async t => {
   installTestPluginRuntime(); dom.window.localStorage.clear();
   const app = await loadPluginApp(() => import("./app.js"));

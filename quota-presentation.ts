@@ -1,6 +1,6 @@
 import type { AccountLimitsPanelSnapshot, AccountLimitsReadInput, QuotaAccount } from "./contract.js";
 import { aggregateCliproxyPool, groupAccountPools, type PoolWindow } from "./pool.js";
-import { buildWeeklyPace, isWeeklyBudget } from "./weekly-pace.js";
+import { buildWeeklyPace, isWeeklyBudget, type WeeklyPace } from "./weekly-pace.js";
 
 /** Pool precedence affects presentation and reminders only; raw observations stay intact. */
 function preferCodexPool(snapshot: AccountLimitsPanelSnapshot): AccountLimitsPanelSnapshot {
@@ -149,7 +149,7 @@ export interface CompactPoolSummary {
   fullLabel: string;
   usedPercent: number | null;
   detail: string;
-  paceWarning: boolean;
+  pace: WeeklyPace | null;
   /** Only reporting accounts enter the denominator; missing observations are excluded. */
   partial: boolean;
 }
@@ -177,7 +177,7 @@ export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machi
     account.usage.status === "ok" && account.usage.windows.some(window => isWeeklyBudget(window.label))));
   return groups.flatMap<CompactPoolSummary>(group => {
     if (group.id === "without-weekly") return hasReportedWeek ? [] : [{ key: group.id, label: "周未报", fullLabel: "总周额度未返回", usedPercent: null,
-      detail: `${group.accounts.length} 个账号未返回总周额度，独立统计`, paceWarning: false, partial: false }];
+      detail: `${group.accounts.length} 个账号未返回总周额度，独立统计`, pace: null, partial: false }];
     const pool = aggregateCliproxyPool(group.accounts);
     if (pool.status !== "ok" || !pool.windows.length) return [];
     const weekly = pool.windows.filter(window => isWeeklyBudget(window.label));
@@ -193,7 +193,7 @@ export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machi
       const partial = window.accounts < accounts.length;
       return { key: `${group.id}:${window.id}`, label, fullLabel, usedPercent: window.usedPercent, partial,
         detail: `覆盖 ${window.accounts}/${accounts.length}${group.label ? ` · ${group.label}` : ""}${missingWeekly && isWeeklyBudget(window.label) ? ` · ${missingWeekly} 个账号未返回总周额度` : ""}${partial ? " · * 仅统计已返回该窗口的账号，不代表全池额度" : ""}`,
-        paceWarning: pace?.level === "conserve" || pace?.level === "blocked" };
+        pace };
     });
   });
 }

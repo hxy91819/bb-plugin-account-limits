@@ -494,11 +494,11 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
       {entries.map(entry => {
         const metrics = compactPoolSummaries(entry.provider, now).map(metric => ({ ...metric,
           percent: metric.usedPercent === null ? null : Math.round(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent),
-          tone: metric.usedPercent === null ? "unknown" : metric.usedPercent >= 95 ? "critical" : metric.usedPercent >= 80 || metric.paceWarning ? "warning" : "normal",
+          tone: metric.usedPercent === null ? "unknown" : metric.usedPercent >= 95 ? "critical" : metric.pace?.level === "conserve" || metric.pace?.level === "blocked" ? "warning" : metric.pace?.level === "generous" ? "generous" : metric.usedPercent >= 80 ? "warning" : "normal",
         }));
         const name = entry.provider.displayName.replace(" (SDK)", "").replace(" · ", " ");
         const summary = metrics.map(metric => `${metrics.length === 1 ? metric.fullLabel : metric.label}${metric.percent === null ? " —" : `${mode === "used" ? "已用" : "剩余"} ${metric.percent}%${metric.partial ? "*" : ""}`}`).join("，");
-        const detail = metrics.map(metric => `${metric.fullLabel} · ${metric.detail}`).join("；");
+        const detail = metrics.map(metric => `${metric.fullLabel}${metric.pace ? ` · ${metric.pace.label}` : ""} · ${metric.detail}`).join("；");
         return <button type="button" key={entry.key} className="limits-compact-service" data-tone={metrics.length === 1 ? metrics[0]!.tone : "normal"} aria-pressed={entry.key === active?.key}
           aria-label={entry.provider.displayName}
           title={`${entry.machine.displayName} · ${sourceNames[entry.machine.source ?? "cliproxy"]}${summary ? ` · ${summary}（池汇总，各项分别统计） · ${detail}` : ""}`}

@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Mark generous weekly pace in green across compact service percentages, quota values, bars and badges; preserve independent Gemini/Claude-GPT states.
+
 - Show measurable Claude weekly quota with a partial-coverage asterisk in compact cards; keep wholly missing weeks unknown and details separately pooled.
 
 - Persist quota reminder history across page reloads and re-entry; retain higher-threshold and reset-cycle alerts.
