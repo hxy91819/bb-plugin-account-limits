@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0
+
+- Read existing BB usage-capable providers alongside optional Account Pooler and CLI Proxy sources.
+- Add a compact sidebar footer with shared used/remaining and account/pool preferences, default failure hiding, and 80%/95% reminders at the top right.
+- Show Cursor subscription and on-demand budgets separately, and prefer usable pooled Codex quotas over duplicate native entries.
+- Preserve cached observations on discovery failures and record fresh native Codex/Claude collection times for weekly pacing.
+- Keep ACP configuration and execution independent of the dashboard; verified tasks finish with a commit and push.
+
+## 0.3.4 - 2026-10-18
+
+- Read Antigravity quotas from the production summary endpoint to restore Gemini weekly and 5-hour windows alongside Claude/GPT.
+- Keep daily project/plan discovery, separate family windows and the existing request count.
+
+## 0.3.3 - 2026-10-17
+
+- Show the nearest weekly reset batch with individual remaining, exhausted or 5h-restricted states.
+- Label pool-wide pacing explicitly and highlight existing near-reset priority opportunities.
+- Keep unknown/stale/overdue quota pending confirmation; retain unused accounts in the nearest batch.
+
 ## 0.3.2 - 2026-10-16
 
 - Replace the crowded quota mark with a simple gauge that stays clear at sidebar sizes.

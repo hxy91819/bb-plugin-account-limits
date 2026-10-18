@@ -775,3 +775,113 @@ test("Cursor shows subscription and on-demand budgets separately and follows the
   assert.ok(within(full.container).getByText("套餐额度"));
   assert.ok(within(full.container).getByText("按量预算"));
 });
+
+test("池把整池节奏和最近账号余量分开显示，两种来源及百分比模式均不额外请求", async t => {
+  installTestPluginRuntime();
+  const now = new Date("2026-10-17T00:00:00Z");
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now });
+  const app = await loadPluginApp(() => import("./app.js"));
+  const at = (hours: number) => new Date(now.getTime() + hours * 3_600_000).toISOString();
+  for (const source of ["cliproxy", "account-pool"] as const) {
+    dom.window.localStorage.clear();
+    dom.window.localStorage.setItem("account-limits.view", "pool");
+    const weeklyId = source === "account-pool" ? "weekly-all" : "7d";
+    const make = (key: string, remaining: number, hours: number) => ({ key, label: key, weight: 1, updatedAt: at(0),
+      usage: { status: "ok" as const, planLabel: null, windows: [
+        { id: weeklyId, label: "Weekly limit", usedPercent: 100 - remaining, resetsAt: at(hours) },
+        { label: "5-hour limit", usedPercent: 20, resetsAt: at(1) },
+        { label: "Weekly scoped limit", usedPercent: 50, resetsAt: at(0.5) },
+      ] } });
+    const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: source, source, displayName: source, status: "connected", error: null,
+      providers: [{ id: source === "cliproxy" ? "cliproxy-claude" : "account-pool:claude-code", displayName: "Claude", updatedAt: at(0),
+        usage: { status: "ok", planLabel: null, windows: [] }, accounts: [make("最近账号", 60, 7.5), make("B", 0, 144), make("C", 0, 144), make("D", 30, 144), make("E", 65, 144)] }],
+    }] };
+    const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+    t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+    await slot.findByText("Claude");
+    const weekly = within(slot.getByRole("group", { name: "周额度" }));
+    const advice = weekly.getByRole("note", { name: /^周额度建议：节约用/u });
+    assert.match(advice.textContent!, /整池节奏.*节约用/u);
+    const next = () => weekly.getByRole("note", { name: /^最近重置账号/u });
+    assert.match(next().textContent!, /最近重置：7小时30分钟.*1 个账号.*周剩 60%.*建议先用/u);
+    assert.match(next().getAttribute("title")!, /最近账号：周剩 60%/u);
+    assert.ok(weekly.getByText(/覆盖 5\/5 · 全池 2 账号已耗尽/u));
+    await act(async () => { slot.getByRole("button", { name: "已用（Used）" }).click(); });
+    assert.match(next().textContent!, /周剩 60%/u);
+    assert.equal(slot.queryByRole("button", { name: /恢复计划/u }), null);
+    assert.equal(slot.queryByRole("dialog", { hidden: true }), null);
+    await act(async () => { slot.getByRole("button", { name: "账号" }).click(); });
+    assert.equal(slot.queryByText("整池节奏"), null);
+    assert.equal(slot.queryByRole("note", { name: /^最近重置账号/u }), null);
+    assert.equal(slot.inspection.rpcCalls.length, 1);
+    slot.lifecycle.unmount();
+  }
+});
+
+test("最近重置摘要显示同批账号状态，越过重置时等待确认并保留缓存值", async t => {
+  installTestPluginRuntime();
+  const now = new Date("2026-10-17T00:00:00Z");
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now });
+  dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.view", "pool");
+  const app = await loadPluginApp(() => import("./app.js"));
+  const at = (hours: number) => new Date(now.getTime() + hours * 3_600_000).toISOString();
+  const make = (key: string, remaining: number, hours = 0.5) => ({ key, label: key, weight: 1, updatedAt: at(0), usage: { status: "ok" as const, planLabel: null,
+    windows: [{ label: "Weekly limit", usedPercent: 100 - remaining, resetsAt: at(hours) }] } });
+  const blocked = make("有余量但受限", 42);
+  blocked.usage.windows.push({ label: "5-hour limit", usedPercent: 100, resetsAt: at(0.25) });
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", source: "cliproxy", displayName: "proxy", status: "connected", error: null,
+    providers: [{ id: "cliproxy-codex", displayName: "Codex", updatedAt: at(0), usage: { status: "ok", planLabel: null, windows: [] },
+      accounts: [make("零余量", 0), blocked, make("少量", 0.01), make("晚重置", 80, 4)] }],
+  }] };
+  const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await slot.findByText("Codex");
+  const next = () => slot.getByRole("note", { name: /^最近重置账号/u });
+  assert.match(next().textContent!, /3 个账号.*1 有余量、1 已耗尽、1 5h 暂受限/u);
+  assert.match(next().getAttribute("title")!, /零余量：周额已用尽/u);
+  assert.match(next().getAttribute("title")!, /有余量但受限：周剩 42%，5h 暂受限/u);
+  assert.match(next().getAttribute("title")!, /少量：周剩 <0.1%/u);
+  assert.equal(slot.queryByText("建议先用"), null);
+  const bar = slot.getByRole("progressbar", { name: "7d 剩余额度" });
+  const observed = bar.getAttribute("aria-valuenow");
+  await act(async () => { t.mock.timers.tick(31 * 60_000); });
+  assert.match(next().textContent!, /已到重置时间，待刷新.*3 个账号.*3 待确认/u);
+  assert.equal(bar.getAttribute("aria-valuenow"), observed);
+  assert.equal(slot.inspection.rpcCalls.length, 1);
+});
+
+test("部分重置时间未知时只称最近已知，旧测量与全部未知时不显示可用余量", async t => {
+  installTestPluginRuntime();
+  const now = new Date("2026-10-17T00:00:00Z");
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now });
+  dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.view", "pool");
+  const app = await loadPluginApp(() => import("./app.js"));
+  const at = (hours: number) => new Date(now.getTime() + hours * 3_600_000).toISOString();
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", source: "cliproxy", displayName: "proxy", status: "connected", error: null,
+    providers: [{ id: "cliproxy-codex", displayName: "Codex", updatedAt: at(0), usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
+      { key: "known", label: "已知", weight: 1, updatedAt: at(0), usage: { status: "ok", planLabel: null, windows: [{ label: "Weekly limit", usedPercent: 58, resetsAt: at(7.5) }] } },
+      { key: "unknown", label: "未知时间", weight: 1, updatedAt: at(0), usage: { status: "ok", planLabel: null, windows: [{ label: "Weekly limit", usedPercent: 50, resetsAt: null }] } },
+    ] }],
+  }] };
+  const render = () => renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  let slot = render();
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await slot.findByText("Codex");
+  const next = () => slot.getByRole("note", { name: /^最近已知重置账号/u });
+  assert.match(next().textContent!, /最近已知重置.*周剩 42%.*建议先用/u);
+  assert.match(next().getAttribute("title")!, /另有 1 个账号的周窗口或重置时间未知/u);
+  await act(async () => { t.mock.timers.tick(61 * 60_000); });
+  assert.match(next().textContent!, /余量待确认/u);
+  assert.doesNotMatch(next().textContent!, /周剩 42%/u);
+  assert.equal(slot.queryByText("建议先用"), null);
+  assert.equal(slot.inspection.rpcCalls.length, 1);
+  slot.lifecycle.unmount();
+  const account = snapshot.machines[0]!.providers[0]!.accounts[0]!;
+  if (account.usage.status === "ok") account.usage.windows[0]!.resetsAt = null;
+  slot = render();
+  await slot.findByText("Codex");
+  assert.ok(slot.getByText("最近重置时间未知"));
+  assert.equal(slot.queryByRole("note", { name: /^最近.*重置账号/u }), null);
+});
