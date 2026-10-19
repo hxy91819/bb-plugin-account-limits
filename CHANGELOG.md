@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Establish a quiet reminder baseline on page entry so existing low quota does not pop up again when browser history is missing or unavailable.
+
 - Mark generous weekly pace in green across compact service percentages, quota values, bars and badges; preserve independent Gemini/Claude-GPT states.
 
 - Show measurable Claude weekly quota with a partial-coverage asterisk in compact cards; keep wholly missing weeks unknown and details separately pooled.

@@ -667,18 +667,18 @@ test("collapsed footer monitoring checks thresholds without duplicate alerts and
   } } });
   t.after(() => { overlay.lifecycle.unmount(); dom.window.localStorage.clear(); });
   await act(async () => { await Promise.resolve(); });
-  assert.equal(reads, 1); assert.equal(warnings.length, 1);
+  assert.equal(reads, 1); assert.equal(warnings.length, 0);
   used = 96;
   await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
-  assert.equal(reads, 2); assert.equal(warnings.length, 2);
+  assert.equal(reads, 2); assert.equal(warnings.length, 1);
   await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
-  assert.equal(reads, 3); assert.equal(warnings.length, 2);
+  assert.equal(reads, 3); assert.equal(warnings.length, 1);
   overlay.lifecycle.unmount();
   await act(async () => { t.mock.timers.tick(5 * 60_000); });
   assert.equal(reads, 3);
 });
 
-test("quota reminders survive page re-entry without repeating an unchanged threshold", async t => {
+test("opening a page establishes a quiet baseline even when reminder history is absent", async t => {
   installTestPluginRuntime(); dom.window.localStorage.clear();
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-18T00:00:00Z") });
   const { toast } = await import("sonner");
@@ -700,17 +700,23 @@ test("quota reminders survive page re-entry without repeating an unchanged thres
     }] }) } });
     await act(async () => { await Promise.resolve(); });
   };
-  await reenter(); assert.equal(warnings.length, 1);
-  await reenter(); assert.equal(warnings.length, 1);
+  await reenter(); assert.equal(warnings.length, 0);
+  await reenter(); assert.equal(warnings.length, 0);
+  dom.window.localStorage.removeItem("account-limits.alert-history.v1");
+  await reenter(); assert.equal(warnings.length, 0);
   used = 96;
-  await reenter(); assert.equal(warnings.length, 2);
-  await reenter(); assert.equal(warnings.length, 2);
+  await reenter(); assert.equal(warnings.length, 0);
+  await reenter(); assert.equal(warnings.length, 0);
   used = 20;
-  await reenter(); assert.equal(warnings.length, 2);
+  await reenter(); assert.equal(warnings.length, 0);
   used = 85;
-  await reenter(); assert.equal(warnings.length, 3);
+  await reenter(); assert.equal(warnings.length, 0);
   resetsAt = "2026-10-31T00:00:00Z";
-  await reenter(); assert.equal(warnings.length, 4);
+  await reenter(); assert.equal(warnings.length, 0);
+  used = 96;
+  await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
+  assert.equal(warnings.length, 1);
+  await reenter(); assert.equal(warnings.length, 1);
 });
 
 test("reminders disabled at startup do not consume thresholds and the monitor never forces disclosure open", async t => {
@@ -735,15 +741,15 @@ test("reminders disabled at startup do not consume thresholds and the monitor ne
   assert.equal(warnings.length, 0);
   assert.equal(app.experimentalSidebarFooterItems[0]!.runtime.getSnapshot().command, null);
   await setReminders(true);
-  assert.equal(warnings.length, 1);
+  assert.equal(warnings.length, 0);
   await setReminders(false);
   used = 96;
   await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
-  assert.equal(warnings.length, 1);
+  assert.equal(warnings.length, 0);
   await setReminders(true);
-  assert.equal(warnings.length, 2);
+  assert.equal(warnings.length, 1);
   await setReminders(false); await setReminders(true);
-  assert.equal(warnings.length, 2);
+  assert.equal(warnings.length, 1);
 });
 
 test("hidden windows pause periodic reads; visibility and focus resume once and are cleaned up", async t => {

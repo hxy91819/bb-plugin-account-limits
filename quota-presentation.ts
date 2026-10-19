@@ -108,9 +108,10 @@ export interface QuotaAlertStorage {
 interface AlertHistoryEntry { level: number; resetsAt: number | null; }
 const alertHistoryKey = "account-limits.alert-history.v1";
 
-/** Persist crossings per window; page reloads do not turn old levels into new alerts. */
+/** Seed the first usable snapshot quietly; notify only subsequent crossings. */
 export function createQuotaAlertTracker(storage?: QuotaAlertStorage) {
   let levels = new Map<string, AlertHistoryEntry>();
+  let initialized = false;
   return (snapshot: AccountLimitsPanelSnapshot): QuotaAlert[] => {
     // Read again before deciding so another open page's recorded alerts are seen.
     try {
@@ -123,15 +124,18 @@ export function createQuotaAlertTracker(storage?: QuotaAlertStorage) {
         levels = new Map(saved.map(([key, value]) => [key, { level: value.level, resetsAt: value.resetsAt }]));
       }
     } catch { /* Unavailable or invalid storage keeps this page's in-memory state. */ }
-    const alerts = quotaAlerts(snapshot).filter(alert => {
+    const observations = quotaAlerts(snapshot);
+    const baseline = !initialized;
+    if (observations.length) initialized = true;
+    const alerts = observations.filter(alert => {
       const previous = levels.get(alert.key);
       const sameCycle = previous && (previous.resetsAt === null || alert.resetsAt === null || previous.resetsAt === alert.resetsAt);
       levels.set(alert.key, { level: alert.level, resetsAt: alert.resetsAt ?? previous?.resetsAt ?? null });
-      return alert.level > (sameCycle ? previous.level : 0);
+      return previous !== undefined && alert.level > (sameCycle ? previous.level : 0);
     });
     try { storage?.setItem(alertHistoryKey, JSON.stringify([...levels])); }
     catch { /* The tracker still deduplicates while this page stays open. */ }
-    return alerts;
+    return baseline ? [] : alerts;
   };
 }
 

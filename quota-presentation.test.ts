@@ -67,6 +67,9 @@ test("Cursor budget summaries and threshold reminders retain independent identit
   ] } }];
   assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => [metric.label, metric.usedPercent]), [["套餐", 23], ["按量", 81]]);
   const track = createQuotaAlertTracker();
+  const baseline = structuredClone(data);
+  if (baseline.machines[0]!.providers[0]!.accounts[0]!.usage.status === "ok") baseline.machines[0]!.providers[0]!.accounts[0]!.usage.windows[1]!.usedPercent = 79;
+  assert.equal(track(baseline).length, 0);
   const alerts = track(data);
   assert.equal(alerts.length, 1);
   assert.match(alerts[0]!.title, /按量预算 已用 81%/u);
@@ -100,7 +103,13 @@ test("usable Codex pool replaces native Codex in both display modes and reminder
     const visible = visibleQuota(data, hideFailures)!;
     assert.deepEqual(visible.machines.flatMap(machine => machine.providers.map(provider => provider.id)), ["acp-cursor-sdk", "account-pool:codex"]);
   }
-  const alerts = createQuotaAlertTracker()(data);
+  const track = createQuotaAlertTracker();
+  const low = structuredClone(data);
+  for (const machine of low.machines) for (const provider of machine.providers) for (const account of provider.accounts) {
+    if (account.usage.status === "ok") for (const window of account.usage.windows) window.usedPercent = 79;
+  }
+  track(low);
+  const alerts = track(data);
   assert.equal(alerts.length, 2);
   assert.deepEqual(data, raw);
 });
@@ -192,31 +201,57 @@ test("persistent reminders use stable window identities and known reset cycles a
   usage.windows.push({ id: "session", label: "5-hour limit", usedPercent: 85, resetsAt: null });
   const existingPage = createQuotaAlertTracker(storage);
   const secondPage = createQuotaAlertTracker(storage);
-  assert.equal(existingPage(data).length, 2);
+  assert.equal(existingPage(data).length, 0);
   usage.windows.reverse();
   assert.equal(secondPage(data).length, 0);
   const week = usage.windows.find(window => window.id === "weekly")!;
   const reset = new Date(Date.now() + 7 * 86_400_000).toISOString();
   week.resetsAt = reset;
-  assert.equal(createQuotaAlertTracker(storage)(data).length, 0);
+  assert.equal(existingPage(data).length, 0);
   week.resetsAt = reset.replace("Z", "+00:00");
-  assert.equal(createQuotaAlertTracker(storage)(data).length, 0);
+  assert.equal(existingPage(data).length, 0);
   week.resetsAt = new Date(Date.parse(reset) + 7 * 86_400_000).toISOString();
-  assert.equal(createQuotaAlertTracker(storage)(data).length, 1);
+  assert.equal(existingPage(data).length, 1);
   usage.windows.push({ ...week, usedPercent: 0 });
-  assert.equal(createQuotaAlertTracker(storage)(data).length, 0);
-  assert.equal(createQuotaAlertTracker(storage)(data).length, 0);
+  assert.equal(existingPage(data).length, 0);
+  assert.equal(existingPage(data).length, 0);
 });
 
 test("invalid or unavailable reminder storage preserves per-page deduplication without crashing", () => {
   for (const initial of ["broken JSON", JSON.stringify([["fake", { level: 9, resetsAt: null }]])]) {
     let value = initial;
     const storage = { getItem: () => value, setItem: (_key: string, next: string) => { value = next; } };
-    assert.equal(createQuotaAlertTracker(storage)(snapshot()).length, 1);
-    assert.equal(createQuotaAlertTracker(storage)(snapshot()).length, 0);
+    const track = createQuotaAlertTracker(storage);
+    assert.equal(track(snapshot()).length, 0);
+    assert.equal(track(snapshot(96)).length, 1);
+    assert.equal(track(snapshot(96)).length, 0);
+    assert.equal(createQuotaAlertTracker(storage)(snapshot(96)).length, 0);
   }
   const unavailable = { getItem: (): string | null => { throw new Error("Storage blocked"); }, setItem: () => { throw new Error("Storage full"); } };
   const track = createQuotaAlertTracker(unavailable);
-  assert.equal(track(snapshot()).length, 1);
   assert.equal(track(snapshot()).length, 0);
+  assert.equal(track(snapshot(96)).length, 1);
+  assert.equal(track(snapshot(96)).length, 0);
+});
+
+test("failed and empty startup observations do not turn the first available quota into a new alert", () => {
+  const track = createQuotaAlertTracker();
+  assert.equal(track({ machines: [] }).length, 0);
+  const failed = snapshot(96); failed.machines[0]!.error = "Cached quota";
+  assert.equal(track(failed).length, 0);
+  assert.equal(track(snapshot(85)).length, 0);
+  assert.equal(track(snapshot(96)).length, 1);
+  assert.equal(track(snapshot(96)).length, 0);
+});
+
+test("a quota window discovered after startup is seeded quietly before later threshold crossings", () => {
+  const track = createQuotaAlertTracker();
+  const data = snapshot(20);
+  assert.equal(track(data).length, 0);
+  const usage = data.machines[0]!.providers[0]!.accounts[0]!.usage;
+  if (usage.status !== "ok") throw new Error("Invalid fixture");
+  usage.windows.push({ id: "new-session", label: "5-hour limit", usedPercent: 85, resetsAt: null });
+  assert.equal(track(data).length, 0);
+  usage.windows[1]!.usedPercent = 96;
+  assert.equal(track(data).length, 1);
 });
