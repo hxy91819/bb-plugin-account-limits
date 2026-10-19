@@ -81,6 +81,7 @@ export const panelStyles = `
 .limits-panel .limits-meter-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-bottom: 7px; }
 .limits-panel .limits-meter-title { display: flex; align-items: center; flex-wrap: wrap; gap: 5px 7px; min-width: 0; }
 .limits-panel .limits-meter-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 11px; color: var(--muted-foreground); }
+.limits-panel .limits-meter-advice { margin-top: 6px; }
 .limits-panel .limits-pace { display: inline-flex; flex-shrink: 0; padding: 1px 5px; border-radius: 4px; border: 1px solid var(--limits-line); color: var(--muted-foreground); background: var(--limits-soft); font-size: 10px; line-height: 1.5; font-weight: 500; }
 .limits-panel .limits-pace[data-level=generous] { color: var(--limits-success-text); border-color: color-mix(in srgb, var(--success) 30%, var(--card)); background: color-mix(in srgb, var(--success) 9%, var(--card)); }
 .limits-panel .limits-pace[data-level=conserve], .limits-panel .limits-pace[data-level=blocked] { color: var(--warning-text); border-color: color-mix(in srgb, var(--warning) 35%, var(--card)); background: color-mix(in srgb, var(--warning) 12%, var(--card)); }

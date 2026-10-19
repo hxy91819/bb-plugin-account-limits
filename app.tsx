@@ -174,14 +174,16 @@ function WindowMeter({ window, now, mode }: { window: MeterWindow; now: number; 
     <div className="limits-meter-heading">
       <div className="limits-meter-title">
         <span className="limits-meter-label" title={window.displayLabel ?? shortWindowLabel(label)}>{window.displayLabel ?? shortWindowLabel(label)}</span>
-        {window.pace && <span className="limits-pace" data-level={window.pace.level} role="note"
-          aria-label={`周额度建议：${window.pace.label}。${window.pooled ? "整池节奏。" : ""}${window.pace.reason}`} title={window.pace.reason}>{window.pooled ? <><span className="limits-pace-scope">整池节奏</span><span>{window.pace.label}</span></> : window.pace.label}</span>}
       </div>
       <span className="limits-meter-number">{`${Math.round(percent)}%`}</span>
     </div>
     <div className={`limits-meter-track${window.recovery && window.recovery.usedPercent > 0 ? " limits-meter-track--recovery" : ""}`} role="progressbar" aria-label={`${label} ${mode === "used" ? "已用" : "剩余"}额度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} title={`${label} · ${reset}`}>
       {window.recovery && window.recovery.usedPercent > 0 ? <RecoverySegments recovery={window.recovery} mode={mode} now={now} /> : <div className="limits-meter-fill" style={{ width: `${percent}%` }} />}
     </div>
+    {window.pace && <div className="limits-meter-advice">
+      <span className="limits-pace" data-level={window.pace.level} role="note"
+          aria-label={`周额度建议：${window.pace.label}。${window.pooled ? "整池节奏。" : ""}${window.pace.reason}`} title={window.pace.reason}>{window.pooled ? <><span className="limits-pace-scope">整池节奏</span><span>{window.pace.label}</span></> : window.pace.label}</span>
+    </div>}
     {window.nextReset
       ? <><NextReset summary={window.nextReset} now={now} /><p className="limits-reset limits-pool-coverage">{window.detail}</p></>
       : <p className="limits-reset">{window.detail ? `${reset} · ${window.detail}` : reset}</p>}
