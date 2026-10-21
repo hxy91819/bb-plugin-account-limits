@@ -4,7 +4,7 @@ import { definePluginApp, experimental_Icon as BbIcon, useBbNavigate } from "@ge
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
 import { aggregateCliproxyPool, groupAccountPools, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
 import { AntigravityIcon, GrokIcon } from "./provider-icons.js";
-import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, quotaWindowDisplayLabel, type QuotaUiStore } from "./quota-presentation.js";
+import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowDisplayLabel, type QuotaUiStore } from "./quota-presentation.js";
 import { useQuotaData, useQuotaPreference, useQuotaChoicePreference } from "./quota-ui.js";
 import { panelStyles } from "./panel-styles.js";
 import { buildPoolRecovery, type PoolRecovery } from "./pool-recovery.js";
@@ -175,7 +175,7 @@ function WindowMeter({ window, now, mode }: { window: MeterWindow; now: number; 
       <div className="limits-meter-title">
         <span className="limits-meter-label" title={window.displayLabel ?? shortWindowLabel(label)}>{window.displayLabel ?? shortWindowLabel(label)}</span>
       </div>
-      <span className="limits-meter-number">{`${Math.round(percent)}%`}</span>
+      <span className="limits-meter-number">{`${formatQuotaPercent(percent)}%`}</span>
     </div>
     <div className={`limits-meter-track${window.recovery && window.recovery.usedPercent > 0 ? " limits-meter-track--recovery" : ""}`} role="progressbar" aria-label={`${label} ${mode === "used" ? "已用" : "剩余"}额度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} title={`${label} · ${reset}`}>
       {window.recovery && window.recovery.usedPercent > 0 ? <RecoverySegments recovery={window.recovery} mode={mode} now={now} /> : <div className="limits-meter-fill" style={{ width: `${percent}%` }} />}
@@ -212,8 +212,8 @@ function ModelCap({ window, now, mode }: { window: MeterWindow; now: number; mod
       <span className="limits-cap-label">{modelWeeklyName(window.label)} 周上限</span>
       <span className="limits-cap-value" data-depleted={remaining <= 10 || undefined} role="progressbar"
         aria-label={`${window.label} ${mode === "used" ? "已用" : "剩余"}额度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}
-        aria-valuetext={`${mode === "used" ? "已用" : "剩余"} ${Math.round(percent)}%，以 ${modelWeeklyName(window.label)} 自身周上限计算`}>
-        <span className="limits-cap-mode">{mode === "used" ? "已用" : "剩余"}</span> {Math.round(percent)}%
+        aria-valuetext={`${mode === "used" ? "已用" : "剩余"} ${formatQuotaPercent(percent)}%，以 ${modelWeeklyName(window.label)} 自身周上限计算`}>
+        <span className="limits-cap-mode">{mode === "used" ? "已用" : "剩余"}</span> {formatQuotaPercent(percent)}%
       </span>
     </div>
     <p className="limits-reset">{window.detail ? `${reset} · ${window.detail}` : reset}</p>
@@ -495,7 +495,7 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
     {entries.length > 0 && <div className="limits-compact-services" aria-label="额度服务">
       {entries.map(entry => {
         const metrics = compactPoolSummaries(entry.provider, now).map(metric => ({ ...metric,
-          percent: metric.usedPercent === null ? null : Math.round(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent),
+          percent: metric.usedPercent === null ? null : formatQuotaPercent(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent),
           tone: metric.usedPercent === null ? "unknown" : metric.usedPercent >= 95 ? "critical" : metric.pace?.level === "conserve" || metric.pace?.level === "blocked" ? "warning" : metric.pace?.level === "generous" ? "generous" : metric.usedPercent >= 80 ? "warning" : "normal",
         }));
         const name = entry.provider.displayName.replace(" (SDK)", "").replace(" · ", " ");

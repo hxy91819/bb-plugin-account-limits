@@ -147,6 +147,14 @@ export function quotaWindowDisplayLabel(providerId: string, label: string): stri
   return undefined;
 }
 
+/** Avoid displaying a positive near-boundary fraction as exactly empty or full. */
+export function formatQuotaPercent(value: number): string {
+  if (value > 0 && value < 0.1) return "<0.1";
+  if (value > 99.9 && value < 100) return ">99.9";
+  if (value > 0 && value < 1 || value > 99 && value < 100) return String(Number(value.toFixed(1)));
+  return String(Math.round(value));
+}
+
 export interface CompactPoolSummary {
   key: string;
   label: string;

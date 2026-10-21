@@ -1042,3 +1042,40 @@ test("部分重置时间未知时只称最近已知，旧测量与全部未知�
   assert.ok(slot.getByText("最近重置时间未知"));
   assert.equal(slot.queryByRole("note", { name: /^最近.*重置账号/u }), null);
 });
+
+test("small Gemini pool usage stays visible instead of rounding to an empty quota bar", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.view", "pool");
+  dom.window.localStorage.setItem("account-limits.display-mode", "used");
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+  const accounts = [0, 0, 0, 1.31474].map((usedPercent, i) => ({ key: `account-${i}`, label: `Example ${i}`, weight: 1,
+    usage: { status: "ok" as const, planLabel: null, windows: [
+      { label: "Gemini Models: Weekly limit", usedPercent, resetsAt: null },
+      { label: "Gemini Models: 5-hour limit", usedPercent: 0, resetsAt: null },
+    ] } }));
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", source: "cliproxy", displayName: "Proxy", status: "connected", error: null,
+    providers: [{ id: "cliproxy-antigravity", displayName: "Gemini", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts }] }] };
+  const rpc = { readAccountLimits: () => snapshot };
+  const compact = renderSlot(footer, { dismiss() {} }, { rpc });
+  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const card = await compact.findByRole("button", { name: "Gemini" });
+  const value = () => card.querySelector('.limits-compact-service-value')?.textContent;
+  assert.equal(value(), "0.3%");
+  const bar = within(compact.container).getByRole("progressbar", { name: "Gem 7d 已用额度" });
+  assert.ok(Number(bar.getAttribute("aria-valuenow")) > 0.32);
+  assert.equal(bar.closest('.limits-meter')!.querySelector('.limits-meter-number')!.textContent, "0.3%");
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
+  t.after(() => full.lifecycle.unmount());
+  await act(async () => { within(full.container).getByRole("button", { name: "剩余" }).click(); });
+  assert.equal(value(), "99.7%");
+  accounts[3]!.usage.windows[0]!.usedPercent = 0.01;
+  await act(async () => { compact.getByRole("button", { name: "刷新精简额度" }).click(); });
+  assert.equal(value(), ">99.9%");
+  await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
+  assert.equal(value(), "<0.1%");
+  accounts[3]!.usage.windows[0]!.usedPercent = 0;
+  await act(async () => { compact.getByRole("button", { name: "刷新精简额度" }).click(); });
+  assert.equal(value(), "0%");
+});

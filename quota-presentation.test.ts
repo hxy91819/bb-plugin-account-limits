@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries } from "./quota-presentation.js";
+import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent } from "./quota-presentation.js";
 import type { AccountLimitsPanelSnapshot } from "./contract.js";
 
 const snapshot = (usedPercent = 85): AccountLimitsPanelSnapshot => ({ machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
@@ -254,4 +254,10 @@ test("a quota window discovered after startup is seeded quietly before later thr
   assert.equal(track(data).length, 0);
   usage.windows[1]!.usedPercent = 96;
   assert.equal(track(data).length, 1);
+});
+
+test("quota percentages distinguish small values from exact zero and full capacity", () => {
+  for (const [value, expected] of [[0, "0"], [0.001, "<0.1"], [0.1, "0.1"], [0.328685, "0.3"], [1, "1"], [25.3, "25"], [99.671315, "99.7"], [99.99, ">99.9"], [100, "100"]] as const) {
+    assert.equal(formatQuotaPercent(value), expected);
+  }
 });

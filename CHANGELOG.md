@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Preserve small nonzero quota percentages near 0%/100% in cards and meters instead of rounding them to empty or full.
+
 - Place weekly pace badges below progress bars so adjacent session and weekly bars stay aligned on mobile.
 
 - Establish a quiet reminder baseline on page entry so existing low quota does not pop up again when browser history is missing or unavailable.
