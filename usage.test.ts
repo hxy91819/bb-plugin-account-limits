@@ -248,7 +248,35 @@ test("Cliproxy provider aggregation keeps successful account limits when another
   }
 });
 
-test("Antigravity uses the complete production quota summary after daily project discovery", async () => {
+test("Antigravity reads measured daily quota with a versioned client identity instead of production placeholders", async () => {
+  const originalFetch = globalThis.fetch;
+  const calls: Array<Record<string, any>> = [];
+  globalThis.fetch = async (input, init) => {
+    if (String(input).endsWith("/auth-files")) return new Response(JSON.stringify({ files: [{ provider: "antigravity", auth_index: "test" }] }));
+    const call = JSON.parse(String(init?.body)); calls.push(call);
+    const body = call.url.endsWith(":loadCodeAssist") ? { cloudaicompanionProject: "test-project", paidTier: { name: "Google AI Ultra" } }
+      : { groups: [
+        { displayName: "Gemini Models", buckets: [
+          { window: "weekly", remainingFraction: call.url.includes("daily-") && call.header["User-Agent"].startsWith("antigravity/hub/") ? 0.067 : 1, resetTime: "2026-10-24T01:00:00Z" },
+          { window: "5h", remainingFraction: 0.68, resetTime: "2026-10-22T06:00:00Z" },
+        ] },
+        { displayName: "Claude and GPT models", buckets: [{ window: "weekly", remainingFraction: 0.9, resetTime: "2026-10-28T08:00:00Z" }] },
+      ] };
+    return new Response(JSON.stringify({ status_code: 200, body: JSON.stringify(body) }));
+  };
+  try {
+    const result = await readCliproxyUsage({ provider: "antigravity", authIndex: "test" }, { managementBaseUrl: "http://proxy.test/v0/management" });
+    assert.ok(result.supported && result.usage.status === "ok");
+    assert.equal(result.usage.windows.find(w => w.label === "Gemini Models: Weekly limit")!.usedPercent, 93.3);
+    assert.equal(result.usage.planLabel, "Google AI Ultra");
+    assert.equal(calls.length, 2);
+    assert.ok(calls.every(call => call.header.Authorization === "Bearer $TOKEN$"));
+    assert.equal(calls[1]!.url, "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary");
+    assert.deepEqual(JSON.parse(calls[1]!.data), { project: "test-project" });
+  } finally { globalThis.fetch = originalFetch; }
+});
+
+test("Antigravity falls back to production when daily omits a quota family", async () => {
   const originalFetch = globalThis.fetch;
   const apiCalls: Array<Record<string, unknown>> = [];
   globalThis.fetch = async (input, init) => {
@@ -278,18 +306,52 @@ test("Antigravity uses the complete production quota summary after daily project
     });
     assert.ok(result.supported && result.usage.status === "ok");
     assert.deepEqual(result.usage.windows, [
-      { label: "Gemini Models: 5-hour limit", usedPercent: 20, resetsAt: "2026-09-09T11:00:00.000Z" },
-      { label: "Gemini Models: Weekly limit", usedPercent: 50, resetsAt: "2026-09-12T10:00:00.000Z" },
       { label: "Claude and GPT models: 5-hour limit", usedPercent: 10, resetsAt: "2026-09-09T12:00:00.000Z" },
       { label: "Claude and GPT models: Weekly limit", usedPercent: 30, resetsAt: "2026-09-13T10:00:00.000Z" },
+      { label: "Gemini Models: 5-hour limit", usedPercent: 20, resetsAt: "2026-09-09T11:00:00.000Z" },
+      { label: "Gemini Models: Weekly limit", usedPercent: 50, resetsAt: "2026-09-12T10:00:00.000Z" },
     ]);
-    assert.equal(apiCalls.length, 2);
+    assert.equal(apiCalls.length, 3);
     assert.match(String(apiCalls[0].url), /daily-cloudcode-pa\.googleapis\.com\/v1internal:loadCodeAssist$/);
-    assert.equal(apiCalls[1].url, "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary");
+    assert.equal(apiCalls[1].url, "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary");
+    assert.equal(apiCalls[2].url, "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary");
     assert.deepEqual(JSON.parse(String(apiCalls[1].data)), { project: "project-1" });
   } finally {
     globalThis.fetch = originalFetch;
   }
+});
+
+test("Antigravity keeps known daily quota on fallback failure and respects authentication failures", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const scenario of ["zero", "partial", "fallback-error", "fallback-network", "denied", "rate-limited"]) {
+      let summaryCalls = 0;
+      globalThis.fetch = async (input, init) => {
+        if (String(input).endsWith("/auth-files")) return new Response(JSON.stringify({ files: [{ provider: "antigravity", auth_index: "test" }] }));
+        const call = JSON.parse(String(init?.body));
+        if (call.url.endsWith(":loadCodeAssist")) return new Response(JSON.stringify({ status_code: 200, body: { cloudaicompanionProject: "test-project" } }));
+        summaryCalls++;
+        const daily = call.url.includes("daily-");
+        if (!daily && scenario === "fallback-network") throw new Error("Network unavailable");
+        const status = daily && scenario === "denied" ? 403 : daily && scenario === "rate-limited" ? 429 : !daily && scenario === "fallback-error" ? 500 : 200;
+        const body = { groups: [
+          { displayName: "Gemini Models", buckets: [{ window: "weekly", remainingFraction: scenario === "zero" || !daily ? 1 : 0.067 }] },
+          ...(!daily || scenario === "zero" ? [{ displayName: "Claude and GPT models", buckets: [{ window: "weekly", remainingFraction: 0.8 }] }] : []),
+        ] };
+        return new Response(JSON.stringify({ status_code: status, body }));
+      };
+      const result = await readCliproxyUsage({ provider: "antigravity", authIndex: "test" }, { managementBaseUrl: "http://proxy.test/v0/management" });
+      if (scenario === "denied" || scenario === "rate-limited") {
+        assert.ok(result.supported && result.usage.status === "error", scenario);
+        assert.equal(summaryCalls, 1, scenario);
+      } else {
+        assert.ok(result.supported && result.usage.status === "ok", scenario);
+        assert.equal(result.usage.windows.find(w => w.label === "Gemini Models: Weekly limit")!.usedPercent, scenario === "zero" ? 0 : 93.3, scenario);
+        assert.equal(summaryCalls, scenario === "zero" ? 1 : 2, scenario);
+        assert.equal(result.usage.windows.length, scenario === "partial" || scenario === "zero" ? 2 : 1, scenario);
+      }
+    }
+  } finally { globalThis.fetch = originalFetch; }
 });
 
 test("Kimi reads the official coding-plan usage endpoint through Cliproxy", async () => {

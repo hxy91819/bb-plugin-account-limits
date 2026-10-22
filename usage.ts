@@ -504,7 +504,12 @@ async function readAntigravityUsageThroughCliproxy(
   signal: AbortSignal | undefined,
   timeoutMs: number,
 ): Promise<{ status: number; body: unknown; planLabel: string | null }> {
-  const header = { Authorization: "Bearer $TOKEN$", Accept: "*/*", "Content-Type": "application/json", "User-Agent": "antigravity" };
+  // A bare "antigravity" UA can omit Gemini on daily; production can return
+  // untouched placeholder quotas for accounts whose traffic is served by daily.
+  const platform = process.platform === "darwin" ? "darwin" : process.platform === "win32" ? "windows" : "linux";
+  const architecture = process.arch === "arm64" ? "arm64" : "amd64";
+  const header = { Authorization: "Bearer $TOKEN$", Accept: "*/*", "Content-Type": "application/json",
+    "User-Agent": `antigravity/hub/2.9.1 ${platform}/${architecture}` };
   const load = await callCliproxyApi(managementBaseUrl, managementKey, authIndex, {
     method: "POST",
     url: "https://daily-cloudcode-pa.googleapis.com/v1internal:loadCodeAssist",
@@ -515,15 +520,43 @@ async function readAntigravityUsageThroughCliproxy(
   const project = asString(loadBody?.cloudaicompanionProject);
   if (load.status < 200 || load.status >= 300 || !project) return { status: load.status, body: null, planLabel: null };
   const planLabel = asString(asRecord(loadBody?.paidTier)?.name) ?? asString(asRecord(loadBody?.currentTier)?.name);
+  const request = { method: "POST", header, data: JSON.stringify({ project }) };
   const quota = await callCliproxyApi(managementBaseUrl, managementKey, authIndex, {
-    method: "POST",
-    // Daily may return HTTP 200 with only the Claude/GPT family. The production
-    // summary reports both families; keep daily for project/plan discovery only.
-    url: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
-    header,
-    data: JSON.stringify({ project }),
+    ...request, url: "https://daily-cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
   }, signal, timeoutMs);
-  return { ...quota, planLabel };
+  const normalized = normalizeAntigravityUsage(quota.body, { provider: "antigravity" });
+  const usable = quota.status >= 200 && quota.status < 300 && hasOkUsage(normalized);
+  const complete = (value: ProviderUsageResult) => {
+    if (!value.supported || value.usage.status !== "ok") return false;
+    const windows = value.usage.windows;
+    return ["Gemini Models: ", "Claude and GPT models: "].every(prefix => windows.some(window => window.label.startsWith(prefix)));
+  };
+  // Valid zero usage is authoritative too; do not probe production to override it.
+  if (usable && complete(normalized) || [401, 403, 429].includes(quota.status)) return { ...quota, planLabel };
+  try {
+    const fallback = await callCliproxyApi(managementBaseUrl, managementKey, authIndex, {
+      ...request, url: "https://cloudcode-pa.googleapis.com/v1internal:retrieveUserQuotaSummary",
+    }, signal, timeoutMs);
+    const fallbackUsage = normalizeAntigravityUsage(fallback.body, { provider: "antigravity" });
+    if (fallback.status >= 200 && fallback.status < 300 && hasOkUsage(fallbackUsage)) {
+      if (!usable) return { ...fallback, planLabel };
+      // Fill missing families only; a fallback must not overwrite measured daily usage.
+      const dailyGroups = asRecord(quota.body)?.groups;
+      const fallbackGroups = asRecord(fallback.body)?.groups;
+      if (Array.isArray(dailyGroups) && Array.isArray(fallbackGroups) && normalized.supported && normalized.usage.status === "ok") {
+        const windows = normalized.usage.windows;
+        const extra = fallbackGroups.filter(group => {
+          const name = asString(asRecord(group)?.displayName);
+          return name !== null && !windows.some(window => window.label.startsWith(`${name}: `));
+        });
+        return { ...quota, body: { ...asRecord(quota.body), groups: [...dailyGroups, ...extra] }, planLabel };
+      }
+    }
+    return { ...quota, planLabel };
+  } catch (error) {
+    if (!usable || signal?.aborted) throw error;
+    return { ...quota, planLabel };
+  }
 }
 
 async function readKimiUsageThroughCliproxy(

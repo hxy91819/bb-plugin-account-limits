@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Read Antigravity quotas from daily with a versioned client identity to avoid production Gemini zero-usage placeholders; fill missing families through a bounded production fallback without replacing measured daily data.
+
 - Preserve small nonzero quota percentages near 0%/100% in cards and meters instead of rounding them to empty or full.
 
 - Place weekly pace badges below progress bars so adjacent session and weekly bars stay aligned on mobile.
