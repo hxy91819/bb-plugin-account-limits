@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Use BB's single sidebar scroll viewport for compact quotas, avoiding nested scrolling and interrupted gestures in long account lists.
+
 - Separate subscription tiers before pool aggregation across full/compact views, weekly pacing, reset forecasts and public quota resources; keep Google AI Ultra and Pro in distinct pools.
 
 - Read Antigravity quotas from daily with a versioned client identity to avoid production Gemini zero-usage placeholders; fill missing families through a bounded production fallback without replacing measured daily data.

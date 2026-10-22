@@ -192,7 +192,9 @@ export const panelStyles = `
 
 .limits-panel.limits-compact {
   --limits-fill: var(--sidebar-foreground, var(--foreground));
-  height: auto; max-height: min(65vh, 540px); min-width: 0; overflow: auto; container: none;
+  /* BB's sidebar disclosure owns the capped scroll viewport. Nesting another
+     scroll container here interrupts wheel/touch scrolling between the two. */
+  height: auto; max-height: none; min-width: 0; overflow: visible; container: none;
   color: var(--sidebar-foreground, var(--foreground)); background: var(--sidebar, var(--background));
   font-size: 12px; line-height: 1.5;
 }
