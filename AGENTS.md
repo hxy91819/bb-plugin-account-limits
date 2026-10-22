@@ -2,7 +2,7 @@
 
 A standalone BB quota dashboard. Runtime code uses the public `@get-bb/plugin-sdk` only. It displays quotas; it must not register executable agents or change model routing.
 
-Read `docs/architecture.md` before changing a source boundary, and `weekly-pace.md` before changing pacing. `contract.ts` owns normalized DTOs and public RPC schemas. Preserve existing plugin, resource, cache and preference IDs when upgrading.
+Read `docs/architecture.md` before changing source boundaries, pool grouping or pool summaries, and `weekly-pace.md` before changing pacing. `contract.ts` owns normalized DTOs and public RPC schemas. Preserve existing plugin, resource, cache and preference IDs when upgrading.
 
 Sources own configuration, authentication, discovery and caching. Shared pool logic must remain independent of a service's credentials and API shape. An absent source is hidden; an explicitly configured but failing source retains an error or marked cached observation. Never invent missing quota, reset times or independent subscription counts.
 
