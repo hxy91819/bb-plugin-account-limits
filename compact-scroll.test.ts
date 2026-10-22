@@ -1,15 +1,14 @@
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
-import { existsSync } from "node:fs";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
 import { panelStyles } from "./panel-styles.js";
 
-const chrome = process.env.CHROME_BIN ?? [
-  "/usr/bin/google-chrome", "/usr/bin/chromium", "/usr/bin/chromium-browser",
-].find(path => existsSync(path));
+// The Node-only suite has no system-browser dependency. Opt into this real
+// layout check with an explicitly provisioned Chromium executable.
+const chrome = process.env.CHROME_BIN;
 
 // JSDOM cannot measure overflow. Exercise the plugin CSS inside BB's capped
 // sidebar disclosure in Chromium, including content that grows after a refresh.

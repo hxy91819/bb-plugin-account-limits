@@ -106,7 +106,7 @@ npm run package
 
 Tests use fictional accounts and offline HTTP fixtures. See [architecture](docs/architecture.md) before adding another source. Runtime code uses only the public BB SDK, and does not read Account Pooler credential files or private BB modules.
 
-The compact scrolling regression uses Chromium for real overflow measurements. Tests detect common Linux Chrome/Chromium installations, or use `CHROME_BIN=/path/to/chrome npm run check`; this browser test is skipped when no browser is available.
+The compact scrolling regression uses Chromium for real overflow measurements. Opt in with an explicitly provisioned browser: `CHROME_BIN=/path/to/chrome npm run check`. Without `CHROME_BIN`, the Node-only suite skips this browser integration test and has no system-browser dependency.
 
 The project is extracted from the owner's earlier account-limits tool. The same `account-limits` ID preserves the existing local cache and display preferences. Optional ACP agent launchers from that tool are intentionally outside this standalone quota dashboard; configure agents separately before upgrading if you used those launchers.
 
