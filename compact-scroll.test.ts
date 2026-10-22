@@ -19,7 +19,9 @@ test("compact content has one continuous host-owned scroll viewport", { skip: !c
     "--headless", "--no-sandbox", "--disable-gpu", "--disable-background-networking",
     "--no-first-run", "--no-default-browser-check", "--remote-debugging-port=0",
     `--user-data-dir=${join(directory, "profile")}`, "about:blank",
-  ], { stdio: "ignore" });
+  ], { stdio: ["ignore", "ignore", "pipe"] });
+  let diagnostics = "";
+  browser.stderr.on("data", chunk => { diagnostics = (diagnostics + String(chunk)).slice(-4000); });
   let startupError: Error | undefined;
   browser.on("error", error => { startupError = error; });
   let socket: WebSocket | undefined;
@@ -40,10 +42,11 @@ test("compact content has one continuous host-owned scroll viewport", { skip: !c
     let port: string | undefined;
     for (let attempt = 0; attempt < 200; attempt++) {
       if (startupError) throw startupError;
+      assert.equal(browser.exitCode, null, `Chromium exited before startup: ${diagnostics}`);
       try { port = (await readFile(join(directory, "profile/DevToolsActivePort"), "utf8")).split("\n")[0]; break; }
       catch { await new Promise(resolve => setTimeout(resolve, 50)); }
     }
-    assert.ok(port, "Chromium must start its debugging endpoint");
+    assert.ok(port, `Chromium (${chrome}) must start its debugging endpoint: ${diagnostics}`);
     const tabs = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as Array<{ type: string; webSocketDebuggerUrl: string }>;
     const page = tabs.find(tab => tab.type === "page");
     assert.ok(page, "Chromium must expose a page");
