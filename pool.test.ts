@@ -95,3 +95,28 @@ test("窗口归一化覆盖分组前缀与非标准窗口", () => {
   assert.deepEqual(normalizeCliproxyWindow("Claude and GPT models: 5-hour limit"), { id: "C/G 5h", kind: "custom", label: "C/G 5h" });
   assert.deepEqual(normalizeCliproxyWindow("Claude and GPT models: Weekly limit"), { id: "C/G 7d", kind: "custom", label: "C/G 7d" });
 });
+
+test("different subscription tiers form independent stable pools before weighting", () => {
+  const make = (key: string, planLabel: string | null, usedPercent: number, weight = 1) => ({ ...account(key, weight, [{ label: "Weekly limit", usedPercent, resetsAt: null }]), usage: { status: "ok" as const, planLabel, windows: [{ label: "Weekly limit", usedPercent, resetsAt: null }] } });
+  const accounts = [make("ultra-a", "Google AI Ultra", 90), make("ultra-b", " google  ai ultra ", 100, 3), make("pro", "Google AI Pro", 5, 100), make("unknown", null, 50)];
+  const groups = groupAccountPools("cliproxy-antigravity", accounts);
+  assert.deepEqual(groups.map(group => group.accounts.map(account => account.key)), [["ultra-a", "ultra-b"], ["pro"], ["unknown"]]);
+  const ultra = aggregateCliproxyPool(groups[0]!.accounts);
+  assert.ok(ultra.status === "ok"); assert.equal(ultra.windows[0]!.usedPercent, 97.5);
+  assert.equal(groupAccountPools("cliproxy-antigravity", [accounts[2]!])[0]!.id, groups[1]!.id);
+  assert.deepEqual(groupAccountPools("account-pool:codex", [make("plus-account", "Plus", 80), make("pro-account", "Pro", 10)]).map(group => group.accounts.length), [1, 1]);
+});
+
+test("unknown identity labels and failures stay separate from known tiers; Claude weekly subgroups stay tier-local", () => {
+  const make = (key: string, planLabel: string | null, weekly: boolean) => ({ ...account(key, 1, []), usage: { status: "ok" as const, planLabel, windows: [
+    { label: weekly ? "Weekly limit" : "Weekly scoped limit", usedPercent: 30, resetsAt: null },
+  ] } });
+  const data = [make("pro-week", "Pro", true), make("pro-scoped", "Pro", false), make("team-scoped", "Team", false), make("unknown", "unknown (cached)", true), failing("failed")];
+  const raw = structuredClone(data);
+  const groups = groupAccountPools("claude", data);
+  assert.deepEqual(groups.map(g => [g.kind, g.accounts.map(a => a.key)]), [
+    ["default", ["pro-week"]], ["without-weekly", ["pro-scoped"]], ["without-weekly", ["team-scoped"]], ["default", ["unknown", "failed"]],
+  ]);
+  assert.deepEqual(data, raw);
+  assert.equal(new Set(groups.map(g => g.id)).size, 4);
+});

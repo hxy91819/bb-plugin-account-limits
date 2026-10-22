@@ -262,3 +262,25 @@ test("池内全部账号失败时池资源返回 error 而非 0", async () => {
   assert.equal(measurement.usage.status, "error");
   assert.equal(measurement.observedAt, null);
 });
+
+test("typed pool resources keep stable IDs, isolated denominators and unchanged account resources", async () => {
+  const make = (key: string, planLabel: string, used: number, weight = 1) => ({ key, label: key, weight,
+    usage: { status: "ok" as const, planLabel, windows: [{ label: "Weekly limit", usedPercent: used, resetsAt: null }] } });
+  const ultra = [make("u1", "Google AI Ultra", 80), make("u2", "Google AI Ultra", 100)];
+  const pro = make("p1", "Google AI Pro", 5, 100);
+  const { source, store } = makeSource({ enabled: ["cliproxy-antigravity"], cached: [{ ...provider([...ultra, pro]), id: "cliproxy-antigravity", displayName: "Gemini", updatedAtMs: 10 }] });
+  const resources = (await list(source)).resources;
+  const pools = resources.filter(r => r.id.startsWith("pool:"));
+  assert.equal(pools.length, 2);
+  const ultraId = pools.find(r => r.label.includes("Ultra"))!.id;
+  const proId = pools.find(r => r.label.includes("Pro"))!.id;
+  for (const [id, expected] of [[ultraId, 90], [proId, 5]] as const) {
+    const result = await get(source, id, false); assert.equal(result.usage.status, "ok");
+    if (result.usage.status === "ok") assert.equal(result.usage.windows[0]!.usedPercent, expected);
+  }
+  await assert.rejects(() => get(source, "pool:antigravity", false), /no longer exists/u);
+  assert.deepEqual(resources.filter(r => r.id.startsWith("account:")).map(r => r.id), ["account:antigravity:u1", "account:antigravity:u2", "account:antigravity:p1"]);
+  store.get("host-local")!.providers[0]!.accounts = [pro];
+  assert.equal((await list(source)).resources.filter(r => r.id.startsWith("pool:"))[0]!.id, proId);
+  await assert.rejects(() => get(source, ultraId, false), /no longer exists/u);
+});

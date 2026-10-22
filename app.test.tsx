@@ -519,7 +519,7 @@ test("统一页面同时显示两种来源，共用池与账号切换，刷新 A
   await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
   assert.equal(poolSection().getAllByRole("progressbar")[0]!.getAttribute("aria-valuenow"), "60");
   assert.equal(clipSection().getByRole("progressbar").getAttribute("aria-valuenow"), "80");
-  assert.ok(poolSection().getByText(/覆盖 2\/3/));
+  assert.ok(poolSection().getByText(/覆盖 2\/2/));
   assert.equal(poolSection().queryByRole("region", { name: "Pool A 的额度" }), null);
   await act(async () => { slot.getByRole("button", { name: "已用（Used）" }).click(); });
   assert.equal(poolSection().getAllByRole("progressbar")[0]!.getAttribute("aria-valuenow"), "40");
@@ -912,7 +912,7 @@ test("Cursor shows subscription and on-demand budgets separately and follows the
   const rpc = { readAccountLimits: () => snapshot };
   const compact = renderSlot(footer, { dismiss() {} }, { rpc });
   t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
-  const cursor = await compact.findByRole("button", { name: "Cursor (SDK)" });
+  const cursor = await compact.findByRole("button", { name: "Cursor (SDK) · Team" });
   assert.equal(cursor.querySelectorAll(".limits-compact-service-metric").length, 2);
   assert.match(cursor.textContent!, /套餐77%按量19%/u);
   assert.match(cursor.title, /套餐剩余 77%，按量剩余 19%/u);
@@ -1078,4 +1078,46 @@ test("small Gemini pool usage stays visible instead of rounding to an empty quot
   accounts[3]!.usage.windows[0]!.usedPercent = 0;
   await act(async () => { compact.getByRole("button", { name: "刷新精简额度" }).click(); });
   assert.equal(value(), "0%");
+});
+
+test("Ultra and Pro stay separate in full pools, compact cards, reset batches and pacing", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.view", "pool");
+  const now = Date.parse("2026-10-22T00:00:00Z");
+  t.mock.timers.enable({ apis: ["Date"], now });
+  const at = (hours: number) => new Date(now + hours * 3600_000).toISOString();
+  const make = (key: string, planLabel: string, used: number, hours: number, weight = 1) => ({ key, label: key, weight,
+    usage: { status: "ok" as const, planLabel, windows: [
+      { label: "Gemini Models: Weekly limit", usedPercent: used, resetsAt: at(hours) },
+      { label: "Claude and GPT models: Weekly limit", usedPercent: 20, resetsAt: at(120) },
+    ] } });
+  const accounts = [make("Ultra one", "Google AI Ultra", 90, 120), make("Ultra two", "Google AI Ultra", 90, 120), make("Pro one", "Google AI Pro", 20, 12, 100)];
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", source: "cliproxy", displayName: "Proxy", status: "connected", error: null,
+    providers: [{ id: "cliproxy-antigravity", displayName: "Gemini", updatedAt: at(0), usage: { status: "ok", planLabel: null, windows: [] }, accounts }] }] };
+  const app = await loadPluginApp(() => import("./app.js"));
+  const rpc = { readAccountLimits: () => snapshot };
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
+  t.after(() => { full.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const ultra = within(await full.findByRole("region", { name: "Google AI Ultra 的池额度" }));
+  const pro = within(full.getByRole("region", { name: "Google AI Pro 的池额度" }));
+  assert.equal(ultra.getByRole("progressbar", { name: "Gem 7d 剩余额度" }).getAttribute("aria-valuenow"), "10");
+  assert.equal(pro.getByRole("progressbar", { name: "Gem 7d 剩余额度" }).getAttribute("aria-valuenow"), "80");
+  assert.ok(ultra.getByRole("note", { name: /^周额度建议：节约用/u }));
+  assert.ok(pro.getByRole("note", { name: /^周额度建议：可多用/u }));
+  assert.match(ultra.getAllByRole("note", { name: /^最近重置账号/u })[0]!.getAttribute("title")!, /Ultra one.*Ultra two/u);
+  assert.doesNotMatch(ultra.getAllByRole("note", { name: /^最近重置账号/u })[0]!.getAttribute("title")!, /Pro one/u);
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+  const compact = renderSlot(footer, { dismiss() {} }, { rpc }); t.after(() => compact.lifecycle.unmount());
+  const ultraCard = await compact.findByRole("button", { name: "Gemini · Ultra" });
+  const proCard = compact.getByRole("button", { name: "Gemini · Pro" });
+  assert.equal(ultraCard.querySelectorAll("strong")[0]!.textContent, "10%");
+  assert.equal(proCard.querySelectorAll("strong")[0]!.textContent, "80%");
+  assert.match(ultraCard.title, /覆盖 2\/2/u); assert.match(proCard.title, /覆盖 1\/1/u);
+  assert.doesNotMatch(ultraCard.title, /\*/u); assert.doesNotMatch(proCard.title, /\*/u);
+  await act(async () => { proCard.click(); });
+  assert.equal(within(compact.container).getByRole("progressbar", { name: "Gem 7d 剩余额度" }).getAttribute("aria-valuenow"), "80");
+  await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
+  assert.equal(ultraCard.querySelectorAll("strong")[0]!.textContent, "90%");
+  assert.equal(proCard.querySelectorAll("strong")[0]!.textContent, "20%");
 });

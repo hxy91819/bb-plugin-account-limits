@@ -2,7 +2,7 @@ import { useEffect, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import { definePluginApp, experimental_Icon as BbIcon, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
-import { aggregateCliproxyPool, groupAccountPools, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
+import { aggregateCliproxyPool, groupAccountPools, groupAccountTypes, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
 import { AntigravityIcon, GrokIcon } from "./provider-icons.js";
 import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowDisplayLabel, type QuotaUiStore } from "./quota-presentation.js";
 import { useQuotaData, useQuotaPreference, useQuotaChoicePreference } from "./quota-ui.js";
@@ -471,9 +471,12 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
   const [now, setNow] = useState(Date.now);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(timer); }, []);
   const snapshot = visibleQuota(rawSnapshot, hideFailures);
-  const entries = snapshot?.machines.flatMap(machine => machine.providers.map(provider => ({
-    key: JSON.stringify([machine.source, machine.id, provider.id]), machine, provider,
-  }))) ?? [];
+  const entries = snapshot?.machines.flatMap(machine => machine.providers.flatMap(provider =>
+    groupAccountTypes(provider.accounts).map(type => ({
+      key: JSON.stringify([machine.source, machine.id, provider.id, type.id]), machine,
+      provider: { ...provider, accounts: [...type.accounts] },
+      name: `${provider.displayName}${type.label ? ` · ${type.label.replace(/^Google AI /iu, "")}` : ""}`,
+    })))) ?? [];
   const active = entries.find(entry => entry.key === selected) ?? entries[0];
   return <section className="limits-panel limits-compact" aria-label="账户额度精简版">
     <style>{panelStyles}</style>
@@ -498,11 +501,11 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
           percent: metric.usedPercent === null ? null : formatQuotaPercent(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent),
           tone: metric.usedPercent === null ? "unknown" : metric.usedPercent >= 95 ? "critical" : metric.pace?.level === "conserve" || metric.pace?.level === "blocked" ? "warning" : metric.pace?.level === "generous" ? "generous" : metric.usedPercent >= 80 ? "warning" : "normal",
         }));
-        const name = entry.provider.displayName.replace(" (SDK)", "").replace(" · ", " ");
+        const name = entry.name.replace(" (SDK)", "").replace(" · ", " ");
         const summary = metrics.map(metric => `${metrics.length === 1 ? metric.fullLabel : metric.label}${metric.percent === null ? " —" : `${mode === "used" ? "已用" : "剩余"} ${metric.percent}%${metric.partial ? "*" : ""}`}`).join("，");
         const detail = metrics.map(metric => `${metric.fullLabel}${metric.pace ? ` · ${metric.pace.label}` : ""} · ${metric.detail}`).join("；");
         return <button type="button" key={entry.key} className="limits-compact-service" data-tone={metrics.length === 1 ? metrics[0]!.tone : "normal"} aria-pressed={entry.key === active?.key}
-          aria-label={entry.provider.displayName}
+          aria-label={entry.name}
           title={`${entry.machine.displayName} · ${sourceNames[entry.machine.source ?? "cliproxy"]}${summary ? ` · ${summary}（池汇总，各项分别统计） · ${detail}` : ""}`}
           onClick={() => setSelected(entry.key)}><span className="limits-compact-service-name">{name}</span>{metrics.length > 1 ? <span className="limits-compact-service-metrics">{metrics.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label}</span><strong>{metric.percent === null ? "—" : `${metric.percent}%${metric.partial ? "*" : ""}`}</strong></span>)}</span> : <span className="limits-compact-service-value">{metrics[0]?.percent === undefined || metrics[0].percent === null ? "—" : `${metrics[0].percent}%${metrics[0].partial ? "*" : ""}`}</span>}</button>;
       })}

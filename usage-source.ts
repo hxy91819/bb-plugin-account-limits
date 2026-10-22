@@ -32,9 +32,12 @@ function sourceProviderId(provider: string): string {
 
 function parseResourceId(resourceId: string): { kind: "pool" | "account"; provider: string; accountKey: string | null; poolGroup?: AccountPoolGroup["id"] } | null {
   if (resourceId.startsWith("pool:")) {
-    const [provider, group, ...extra] = resourceId.slice(5).split(":");
-    if (!provider || extra.length || (group !== undefined && (provider !== "claude" || group !== "without-weekly"))) return null;
-    return { kind: "pool", provider, accountKey: null, poolGroup: group === "without-weekly" ? group : "default" };
+    const rest = resourceId.slice(5);
+    const separator = rest.indexOf(":");
+    const provider = separator < 0 ? rest : rest.slice(0, separator);
+    const group = separator < 0 ? "default" : rest.slice(separator + 1);
+    if (!provider || !group) return null;
+    return { kind: "pool", provider, accountKey: null, poolGroup: group };
   }
   if (!resourceId.startsWith("account:")) return null;
   const rest = resourceId.slice(8);

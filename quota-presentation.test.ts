@@ -261,3 +261,15 @@ test("quota percentages distinguish small values from exact zero and full capaci
     assert.equal(formatQuotaPercent(value), expected);
   }
 });
+
+test("missing Claude weeks are marked within their own tier and never hidden by another tier", () => {
+  const provider = snapshot().machines[0]!.providers[0]!; provider.id = "cliproxy-claude";
+  const make = (key: string, planLabel: string, weekly: boolean) => ({ key, label: key, weight: 1,
+    usage: { status: "ok" as const, planLabel, windows: [{ label: weekly ? "Weekly limit" : "Weekly scoped limit", usedPercent: 30, resetsAt: null }] } });
+  provider.accounts = [make("pro-weekly", "Pro", true), make("pro-scoped", "Pro", false), make("team-scoped", "Team", false)];
+  const metrics = compactPoolSummaries(provider, Date.now());
+  assert.equal(metrics.length, 2);
+  assert.equal(metrics[0]!.usedPercent, 30); assert.equal(metrics[0]!.partial, true);
+  assert.match(metrics[0]!.detail, /覆盖 1\/2/u); assert.match(metrics[0]!.detail, /1 个账号未返回/u);
+  assert.equal(metrics[1]!.usedPercent, null); assert.match(metrics[1]!.detail, /Team/u);
+});

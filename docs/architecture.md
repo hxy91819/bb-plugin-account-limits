@@ -26,7 +26,9 @@ Pool accounts only within the same account type and subscription tier. Different
 
 Apply this boundary before computing percentages, reset/recovery forecasts and weekly pacing. The full dashboard, compact service cards and exposed pool summaries must use the same grouping, while retaining the existing source, model-family and missing-total-week boundaries.
 
-Implementation status on 2026-10-22: this rule is recorded for enforcement; the current Antigravity grouping still combines Ultra and Pro and has not yet been changed to satisfy it.
+`groupAccountTypes` in `pool.ts` normalizes the source-reported `planLabel` (case, whitespace and cached suffix), then `groupAccountPools` applies the existing Claude weekly-availability split inside each type. Account identity labels, absent plans and failed queries remain in an unidentified cohort, separate from every known tier; the dashboard does not infer their subscriptions. Existing unidentified-only data retains its legacy grouping. No cross-tier capacity ratio is guessed.
+
+Full-panel pool sections and compact service cards use these same type boundaries. Compact cards select and show details for one type; model-family windows remain separate within each card. Coverage and partial-data stars count only that type. Public quota resources use stable type-qualified pool IDs; existing account resource IDs are unchanged. Legacy untyped pool IDs remain valid only for the unidentified cohort, and removed or changed pools fail lookup instead of silently selecting a different tier.
 
 To add a source, extend the source ID schema, implement a `QuotaSource` adapter returning normalized accounts with stable window IDs and real observation times, register it in the server and add its presentation name. Include tests for absence, source failure, targeted refresh, incomplete measurements and model-window identity. Do not embed another service's authentication or storage rules into shared pool logic.
 

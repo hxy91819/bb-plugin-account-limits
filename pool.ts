@@ -1,7 +1,7 @@
 import type { QuotaAccount } from "./contract.js";
 
 /**
- * Cliproxy 池级聚合：先按 Claude 全模型周额度的可用性分池，再合并各池的窗口。
+ * Cliproxy 池级聚合：先按套餐类型及 Claude 全模型周额度的可用性分池，再合并各池的窗口。
  * server（Provider Usage 来源）和 app（“账户额度”池视图）共用，保持纯函数、不引 Node API。
  */
 
@@ -82,30 +82,61 @@ export type CliproxyPoolUsage =
   | { status: "ok"; okAccounts: number; totalAccounts: number; windows: PoolWindow[] }
   | { status: "error"; message: string };
 
-export interface AccountPoolGroup {
-  id: "default" | "without-weekly";
+export interface AccountPoolType {
+  id: string;
   label: string | null;
   accounts: readonly QuotaAccount[];
 }
 
-/** 按实际报告的额度分组，不从套餐名猜测；查询失败或空响应不视为无周额度账号。 */
-export function groupAccountPools(providerId: string, accounts: readonly QuotaAccount[]): AccountPoolGroup[] {
-  if (!["claude", "claude-code", "cliproxy-claude", "account-pool:claude-code"].includes(providerId)) {
-    return [{ id: "default", label: null, accounts }];
-  }
-  const regular: QuotaAccount[] = [];
-  const withoutWeekly: QuotaAccount[] = [];
+/** A display label equal to an account identity is not subscription metadata. */
+export function groupAccountTypes(accounts: readonly QuotaAccount[]): AccountPoolType[] {
+  const types = new Map<string, { id: string; label: string | null; accounts: QuotaAccount[] }>();
   for (const account of accounts) {
-    const usage = account.usage;
-    const missingWeekly = usage.status === "ok" && usage.windows.length > 0
-      && !usage.windows.some(window => normalizeCliproxyWindow(window.label).id === "7d");
-    (missingWeekly ? withoutWeekly : regular).push(account);
+    const raw = account.usage.status === "ok" ? account.usage.planLabel?.replace(/ \(cached\)$/iu, "").trim().replace(/\s+/gu, " ") : null;
+    const label = raw && raw.toLowerCase() !== account.label.trim().replace(/\s+/gu, " ").toLowerCase()
+      && raw !== account.key && !raw.includes("@") ? raw : null;
+    const id = label ? `type-${encodeURIComponent(label.toLowerCase())}` : "default";
+    let group = types.get(id);
+    if (!group) { group = { id, label, accounts: [] }; types.set(id, group); }
+    group.accounts.push(account);
   }
-  if (withoutWeekly.length === 0) return [{ id: "default", label: null, accounts }];
-  return [
-    ...(regular.length ? [{ id: "default" as const, label: "含全模型周额度", accounts: regular }] : []),
-    { id: "without-weekly", label: "未报告全模型周额度", accounts: withoutWeekly },
-  ];
+  if (!accounts.length) return [{ id: "default", label: null, accounts }];
+  const groups = [...types.values()];
+  if (groups.some(group => group.label !== null)) {
+    for (const group of groups) if (group.label === null) group.label = "套餐未识别";
+  }
+  return groups;
+}
+
+export interface AccountPoolGroup extends AccountPoolType {
+  typeId: string;
+  typeLabel: string | null;
+  kind: "default" | "without-weekly";
+}
+
+/** Tier boundaries apply to every provider; Claude weekly availability is nested within each tier. */
+export function groupAccountPools(providerId: string, accounts: readonly QuotaAccount[]): AccountPoolGroup[] {
+  const claude = ["claude", "claude-code", "cliproxy-claude", "account-pool:claude-code"].includes(providerId);
+  return groupAccountTypes(accounts).flatMap(type => {
+    const regular: QuotaAccount[] = [];
+    const withoutWeekly: QuotaAccount[] = [];
+    for (const account of type.accounts) {
+      const usage = account.usage;
+      const missingWeekly = claude && usage.status === "ok" && usage.windows.length > 0
+        && !usage.windows.some(window => normalizeCliproxyWindow(window.label).id === "7d");
+      (missingWeekly ? withoutWeekly : regular).push(account);
+    }
+    const group = (kind: AccountPoolGroup["kind"], members: readonly QuotaAccount[], suffix: string | null): AccountPoolGroup => ({
+      id: kind === "default" ? type.id : type.id === "default" ? "without-weekly" : `${type.id}:without-weekly`,
+      kind, typeId: type.id, typeLabel: type.label,
+      label: [type.label, suffix].filter(Boolean).join(" · ") || null, accounts: members,
+    });
+    if (!withoutWeekly.length) return [group("default", type.accounts, null)];
+    return [
+      ...(regular.length ? [group("default", regular, "含全模型周额度")] : []),
+      group("without-weekly", withoutWeekly, "未报告全模型周额度"),
+    ];
+  });
 }
 
 /** 只统计 status=ok 的账号；没有任何 ok 账号时返回 error，绝不显示 0 用量。 */
