@@ -1,11 +1,10 @@
 import assert from "node:assert/strict";
-import { execFile } from "node:child_process";
+import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { test } from "node:test";
-import { promisify } from "node:util";
 import { panelStyles } from "./panel-styles.js";
 
 const chrome = process.env.CHROME_BIN ?? [
@@ -16,6 +15,14 @@ const chrome = process.env.CHROME_BIN ?? [
 // sidebar disclosure in Chromium, including content that grows after a refresh.
 test("compact content has one continuous host-owned scroll viewport", { skip: !chrome, timeout: 30_000 }, async () => {
   const directory = await mkdtemp(join(tmpdir(), "quota-scroll-test-"));
+  const browser = spawn(chrome!, [
+    "--headless", "--no-sandbox", "--disable-gpu", "--disable-background-networking",
+    "--no-first-run", "--no-default-browser-check", "--remote-debugging-port=0",
+    `--user-data-dir=${join(directory, "profile")}`, "about:blank",
+  ], { stdio: "ignore" });
+  let startupError: Error | undefined;
+  browser.on("error", error => { startupError = error; });
+  let socket: WebSocket | undefined;
   try {
     const frames = [400, 800, 1100].flatMap(height => [280, 390].map(width => {
       const document = `<style>html{font-size:16px}body{margin:0}${panelStyles}</style>
@@ -29,8 +36,53 @@ test("compact content has one continuous host-owned scroll viewport", { skip: !c
       return `<iframe width="${width}" height="${height}" srcdoc="${escaped}"></iframe>`;
     })).join("");
     const file = join(directory, "scroll.html");
-    await writeFile(file, `<!doctype html><body>${frames}<pre id="result"></pre><script>
-      window.onload = () => {
+    await writeFile(file, `<!doctype html><body>${frames}`);
+    let port: string | undefined;
+    for (let attempt = 0; attempt < 200; attempt++) {
+      if (startupError) throw startupError;
+      try { port = (await readFile(join(directory, "profile/DevToolsActivePort"), "utf8")).split("\n")[0]; break; }
+      catch { await new Promise(resolve => setTimeout(resolve, 50)); }
+    }
+    assert.ok(port, "Chromium must start its debugging endpoint");
+    const tabs = await (await fetch(`http://127.0.0.1:${port}/json/list`)).json() as Array<{ type: string; webSocketDebuggerUrl: string }>;
+    const page = tabs.find(tab => tab.type === "page");
+    assert.ok(page, "Chromium must expose a page");
+    socket = new WebSocket(page.webSocketDebuggerUrl);
+    const connection = socket;
+    await new Promise<void>((resolve, reject) => {
+      connection.addEventListener("open", () => resolve(), { once: true });
+      connection.addEventListener("error", () => reject(new Error("Cannot connect to Chromium")), { once: true });
+    });
+    let sequence = 0;
+    const pending = new Map<number, { resolve(value: any): void; reject(error: Error): void }>();
+    connection.addEventListener("message", event => {
+      const response = JSON.parse(String(event.data));
+      const task = pending.get(response.id);
+      if (!task) return;
+      pending.delete(response.id);
+      if (response.error) task.reject(new Error(JSON.stringify(response.error)));
+      else task.resolve(response.result);
+    });
+    const call = (method: string, params: object = {}) => new Promise<any>((resolve, reject) => {
+      const id = ++sequence;
+      pending.set(id, { resolve, reject });
+      connection.send(JSON.stringify({ id, method, params }));
+    });
+    const evaluate = async (expression: string) => {
+      const result = await call("Runtime.evaluate", { expression, returnByValue: true });
+      assert.equal(result.exceptionDetails, undefined, "Browser evaluation must succeed");
+      return result.result.value;
+    };
+    await call("Page.navigate", { url: `file://${file}` });
+    let ready = false;
+    for (let attempt = 0; attempt < 200; attempt++) {
+      ready = await evaluate(`document.readyState === 'complete' && document.querySelectorAll('iframe').length === 6 &&
+        [...document.querySelectorAll('iframe')].every(frame => frame.contentDocument?.querySelector('.limits-compact-body'))`);
+      if (ready) break;
+      await new Promise(resolve => setTimeout(resolve, 50));
+    }
+    assert.ok(ready, "All sidebar fixtures must load before measuring overflow");
+    const results = await evaluate(`(() => {
         const results = [...document.querySelectorAll('iframe')].map(frame => {
           const doc = frame.contentDocument, host = doc.querySelector('#host');
           const panel = doc.querySelector('.limits-compact'), body = doc.querySelector('.limits-compact-body');
@@ -46,16 +98,8 @@ test("compact content has one continuous host-owned scroll viewport", { skip: !c
           const bottomVisible = body.lastElementChild.getBoundingClientRect().bottom <= host.getBoundingClientRect().bottom + 1;
           return { width: frame.width, height: frame.height, compactHeight, scrollers, distance, bottomVisible };
         });
-        document.querySelector('#result').textContent = JSON.stringify(results);
-      };
-    </script>`);
-    const { stdout } = await promisify(execFile)(chrome!, [
-      "--headless", "--no-sandbox", "--disable-gpu", "--disable-background-networking",
-      `--user-data-dir=${join(directory, "profile")}`, "--dump-dom", "--virtual-time-budget=1000", `file://${file}`,
-    ], { timeout: 20_000, maxBuffer: 2_000_000 });
-    const output = stdout.match(/<pre id="result">([^<]+)<\/pre>/u)?.[1];
-    assert.ok(output, "Browser must report layout measurements");
-    const results = JSON.parse(output) as Array<{ width: string; height: string; compactHeight: number; scrollers: string[]; distance: number; bottomVisible: boolean }>;
+        return results;
+      })()`) as Array<{ width: string; height: string; compactHeight: number; scrollers: string[]; distance: number; bottomVisible: boolean }>;
     assert.equal(results.length, 6);
     for (const result of results) {
       assert.ok(result.compactHeight < 160, "Short content must not reserve a tall empty viewport");
@@ -64,6 +108,11 @@ test("compact content has one continuous host-owned scroll viewport", { skip: !c
       assert.equal(result.bottomVisible, true, "The final account must remain reachable");
     }
   } finally {
+    socket?.close();
+    browser.kill();
+    if (browser.pid && browser.exitCode === null && browser.signalCode === null) {
+      await new Promise(resolve => browser.once("exit", resolve));
+    }
     await rm(directory, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
   }
 });
