@@ -539,7 +539,7 @@ test("统一页面同时显示两种来源，共用池与账号切换，刷新 A
   assert.equal(poolSection().queryByRole("region", { name: "Pool B 的额度" }), null);
 });
 
-test("Gemini 已缓存的逆序窗口在账号和池视图都显示 5h 再 7d，并保留模型分组", async t => {
+test("Gemini 缓存窗口在账号和池视图按周主、5h 次排列，并保留模型分组", async t => {
   dom.window.localStorage.clear();
   installTestPluginRuntime();
   const app = await loadPluginApp(() => import("./app.js"));
@@ -560,12 +560,12 @@ test("Gemini 已缓存的逆序窗口在账号和池视图都显示 5h 再 7d，
   t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
   await slot.findByText("Gemini 账号");
   assert.deepEqual(slot.getAllByRole("progressbar").map(meter => meter.getAttribute("aria-label")), [
-    "Gemini Models: 5-hour limit 剩余额度", "Gemini Models: Weekly limit 剩余额度",
-    "Claude and GPT models: 5-hour limit 剩余额度", "Claude and GPT models: Weekly limit 剩余额度",
+    "Gemini Models: Weekly limit 剩余额度", "Gemini Models: 5-hour limit 剩余额度",
+    "Claude and GPT models: Weekly limit 剩余额度", "Claude and GPT models: 5-hour limit 剩余额度",
   ]);
   await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
   assert.deepEqual(slot.getAllByRole("progressbar").map(meter => meter.getAttribute("aria-label")), [
-    "Gem 5h 剩余额度", "Gem 7d 剩余额度", "C/G 5h 剩余额度", "C/G 7d 剩余额度",
+    "Gem 7d 剩余额度", "Gem 5h 剩余额度", "C/G 7d 剩余额度", "C/G 5h 剩余额度",
   ]);
   assert.deepEqual(windows.map(window => window.usedPercent), [21, 16, 31, 26]);
 });
@@ -1206,4 +1206,116 @@ test("outside activation keeps input focus after the host closes and restores it
   await act(async () => { input.focus(); input.click(); });
   assert.equal(slot.queryByLabelText("账户额度精简版"), null);
   assert.equal(document.activeElement, input);
+});
+
+test("weekly budgets lead every source, with matched 5h windows as secondary status", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const sources = ["cliproxy", "account-pool", "bb-providers"] as const;
+  const snapshot: AccountLimitsPanelSnapshot = { machines: sources.map(source => ({
+    id: source, source, displayName: source, status: "connected" as const, error: null,
+    providers: ["codex", "claude", "antigravity"].map(kind => {
+      const id = source === "account-pool" ? `account-pool:${kind === "claude" ? "claude-code" : kind}` : source === "cliproxy" ? `cliproxy-${kind}` : kind;
+      const windows = kind === "antigravity" ? [
+        { label: "Gemini Models: 5-hour limit", usedPercent: 12, resetsAt: null },
+        { label: "Gemini Models: Weekly limit", usedPercent: 34, resetsAt: null },
+        { label: "Claude and GPT models: 5-hour limit", usedPercent: 56, resetsAt: null },
+        { label: "Claude and GPT models: Weekly limit", usedPercent: 78, resetsAt: null },
+      ] : [
+        { label: "5-hour limit", usedPercent: 100, resetsAt: null },
+        { label: "Weekly limit", usedPercent: 19, resetsAt: null },
+        ...(kind === "claude" ? [{ label: "Weekly scoped limit", usedPercent: 40, resetsAt: null }] : []),
+      ];
+      return { id, displayName: kind, updatedAt: null, usage: { status: "ok" as const, planLabel: null, windows: [] },
+        accounts: [{ key: kind, label: `${source}-${kind}`, weight: 1, usage: { status: "ok" as const, planLabel: null, windows } }] };
+    }),
+  })) };
+  const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  for (const source of sources) for (const kind of ["codex", "claude", "antigravity"]) {
+    if (source === "bb-providers" && kind === "codex") continue; // Usable Account Pooler Codex replaces the native duplicate.
+    const account = await slot.findByRole("region", { name: `${source}-${kind} 的额度` });
+    const meters = within(account).getAllByRole("progressbar");
+    for (const short of meters.filter(meter => /5-hour/u.test(meter.getAttribute("aria-label")!))) {
+      assert.equal(short.closest("li")!.querySelector(".limits-meter-track"), null, "5h is a status, not a competing main bar");
+      const budget = short.closest('[role="group"]')!;
+      assert.ok(within(budget as HTMLElement).getAllByRole("progressbar")[0]!.getAttribute("aria-label")!.includes("Weekly"));
+    }
+    if (kind === "antigravity") {
+      const gem = meters.find(meter => meter.getAttribute("aria-label")!.startsWith("Gemini Models: Weekly"))!;
+      const cg = meters.find(meter => meter.getAttribute("aria-label")!.startsWith("Claude and GPT models: Weekly"))!;
+      assert.deepEqual(within(gem.closest('[role="group"]') as HTMLElement).getAllByRole("progressbar").map(m => m.getAttribute("aria-valuenow")), ["66", "88"]);
+      assert.deepEqual(within(cg.closest('[role="group"]') as HTMLElement).getAllByRole("progressbar").map(m => m.getAttribute("aria-valuenow")), ["22", "44"]);
+    } else assert.ok(within(account).getByText("暂受限"));
+  }
+  await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
+  assert.equal(slot.container.querySelectorAll(".limits-session").length, 11);
+  await act(async () => { slot.getByRole("button", { name: "已用（Used）" }).click(); });
+  const claude = within(slot.getByRole("article", { name: "claude · Cliproxy" }));
+  assert.equal(claude.getByRole("progressbar", { name: "5h 已用额度" }).getAttribute("aria-valuenow"), "100");
+  assert.equal(claude.getByRole("progressbar", { name: "7d 已用额度" }).getAttribute("aria-valuenow"), "19");
+});
+
+test("pool percentages use the whole pool, show decimal precision and count reporting accounts", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.view", "pool");
+  const app = await loadPluginApp(() => import("./app.js"));
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "pool", source: "account-pool", displayName: "Pool", status: "connected", error: null,
+    providers: [{ id: "account-pool:codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] },
+      accounts: [1, 18, 0].map((usedPercent, index) => ({ key: String(index), label: `Account ${index + 1}`, weight: 1,
+        usage: { status: "ok", planLabel: "Pro", windows: [{ label: "Weekly limit", usedPercent, resetsAt: null }] } })),
+    }],
+  }] };
+  const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await slot.findByText("Codex");
+  await act(async () => { slot.getByRole("button", { name: "池" }).click(); slot.getByRole("button", { name: "已用（Used）" }).click(); });
+  assert.ok(slot.getByText("6.3%"));
+  assert.ok(slot.getByText(/3 个账号汇总 · 覆盖 3\/3/u));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact disclosure");
+  const compact = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => compact.lifecycle.unmount());
+  assert.equal((await compact.findByRole("button", { name: "Codex · Pro" })).querySelector(".limits-compact-service-value")!.textContent, "6.3%");
+  await act(async () => { slot.getByRole("button", { name: "剩余" }).click(); });
+  assert.ok(within(slot.container).getByText("93.7%"));
+  assert.equal(compact.getByRole("button", { name: "Codex · Pro" }).querySelector(".limits-compact-service-value")!.textContent, "93.7%");
+});
+
+test("5h-only observations stay secondary and explicitly leave weekly quota unknown", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "native", source: "bb-providers", displayName: "Native", status: "connected", error: null,
+    providers: [{ id: "codex", displayName: "Codex", updatedAt: null, accounts: [], usage: { status: "ok", planLabel: null,
+      windows: [{ accountLabel: "Legacy", label: "Legacy · 5-hour limit", usedPercent: 20, resetsAt: null }] } }],
+  }] };
+  const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await slot.findByText("Legacy");
+  assert.ok(slot.getByText("周额度未返回"));
+  assert.equal(slot.getAllByRole("progressbar").length, 1);
+  assert.equal(slot.getByRole("progressbar").getAttribute("aria-valuenow"), "80");
+  assert.equal(slot.container.querySelectorAll(".limits-meter-track").length, 0);
+});
+
+test("native Codex model sessions stay attached to their own weekly quota", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "native", source: "bb-providers", displayName: "Native", status: "connected", error: null,
+    providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] },
+      accounts: [{ key: "native", label: "Native", weight: 1, usage: { status: "ok", planLabel: "Pro", windows: [
+        { label: "Weekly limit · demo-a", usedPercent: 20, resetsAt: null },
+        { label: "5-hour limit · demo-a", usedPercent: 80, resetsAt: null },
+        { label: "5-hour limit · demo-b", usedPercent: 30, resetsAt: null },
+      ] } }],
+    }],
+  }] };
+  const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const a = within(await slot.findByRole("group", { name: "demo-a 周额度" }));
+  assert.deepEqual(a.getAllByRole("progressbar").map(bar => bar.getAttribute("aria-valuenow")), ["80", "20"]);
+  const b = within(slot.getByRole("group", { name: "demo-b 周额度" }));
+  assert.ok(b.getByText("demo-b 周额度未返回"));
+  assert.equal(b.getByRole("progressbar").getAttribute("aria-valuenow"), "70");
+  assert.equal(slot.container.querySelectorAll(".limits-meter-track").length, 1);
 });

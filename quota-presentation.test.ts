@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent } from "./quota-presentation.js";
+import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowPeriod } from "./quota-presentation.js";
 import type { AccountLimitsPanelSnapshot } from "./contract.js";
 
 const snapshot = (usedPercent = 85): AccountLimitsPanelSnapshot => ({ machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
@@ -176,7 +176,7 @@ test("compact model-family weeks and Cursor budgets use independent weighted poo
   assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => [metric.label, metric.usedPercent]), [["套餐", 25], ["按量", 70]]);
 });
 
-test("compact pools preserve legacy account grouping, short-window fallback and empty failures", () => {
+test("compact pools preserve legacy accounts and never substitute 5h for an unknown week", () => {
   const provider = snapshot().machines[0]!.providers[0]!;
   provider.accounts = [];
   provider.usage = { status: "ok", planLabel: null, windows: [
@@ -186,8 +186,8 @@ test("compact pools preserve legacy account grouping, short-window fallback and 
   assert.deepEqual(compactPoolSummaries(provider, Date.now()).map(metric => metric.usedPercent), [50]);
   provider.usage.windows = provider.usage.windows.map(window => ({ ...window, label: window.label.replace("Weekly limit", "5-hour limit") }));
   const short = compactPoolSummaries(provider, Date.now());
-  assert.equal(short[0]!.usedPercent, 50);
-  assert.equal(short[0]!.fullLabel, "池 5h");
+  assert.equal(short[0]!.usedPercent, null);
+  assert.equal(short[0]!.fullLabel, "周额度未返回");
   provider.usage = { status: "error", message: "Unavailable" };
   assert.deepEqual(compactPoolSummaries(provider, Date.now()), []);
 });
@@ -272,4 +272,28 @@ test("missing Claude weeks are marked within their own tier and never hidden by 
   assert.equal(metrics[0]!.usedPercent, 30); assert.equal(metrics[0]!.partial, true);
   assert.match(metrics[0]!.detail, /覆盖 1\/2/u); assert.match(metrics[0]!.detail, /1 个账号未返回/u);
   assert.equal(metrics[1]!.usedPercent, null); assert.match(metrics[1]!.detail, /Team/u);
+});
+
+test("pool formatting retains one decimal without changing account display or raw values", () => {
+  assert.equal(formatQuotaPercent(19 / 3, 1), "6.3");
+  assert.equal(formatQuotaPercent(100 - 19 / 3, 1), "93.7");
+  assert.equal(formatQuotaPercent(19 / 3), "6");
+  for (const [value, expected] of [[0, "0"], [100, "100"], [0.01, "<0.1"], [99.99, ">99.9"], [20, "20"]] as const) {
+    assert.equal(formatQuotaPercent(value, 1), expected);
+  }
+});
+
+test("session presentation pairs raw, pooled and model-qualified labels without crossing families", () => {
+  for (const label of ["5-hour limit", "Five-hour limit", "5h", "session"]) assert.deepEqual(quotaWindowPeriod(label), { family: "", period: "5h" });
+  assert.deepEqual(quotaWindowPeriod("Gemini Models: Weekly limit"), { family: "Gem", period: "7d" });
+  assert.deepEqual(quotaWindowPeriod("Gem 5h"), { family: "Gem", period: "5h" });
+  assert.deepEqual(quotaWindowPeriod("C/G 7d"), { family: "C/G", period: "7d" });
+  assert.deepEqual(quotaWindowPeriod("5-hour limit · demo-model"), { family: "demo-model", period: "5h" });
+  assert.deepEqual(quotaWindowPeriod("Weekly limit · demo-model"), { family: "demo-model", period: "7d" });
+  assert.equal(quotaWindowPeriod("Weekly scoped limit"), null);
+  const provider = snapshot().machines[0]!.providers[0]!;
+  provider.accounts = provider.accounts.slice(0, 1);
+  if (provider.accounts[0]!.usage.status !== "ok") throw new Error("Fixture");
+  provider.accounts[0]!.usage.windows = [{ label: "5-hour limit · demo-model", usedPercent: 80, resetsAt: null }];
+  assert.equal(compactPoolSummaries(provider, Date.now())[0]!.usedPercent, null);
 });

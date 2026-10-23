@@ -4,7 +4,7 @@ import { definePluginApp, experimental_Icon as BbIcon, useBbNavigate } from "@ge
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
 import { aggregateCliproxyPool, groupAccountPools, groupAccountTypes, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
 import { AntigravityIcon, GrokIcon } from "./provider-icons.js";
-import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowDisplayLabel, type QuotaUiStore } from "./quota-presentation.js";
+import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowDisplayLabel, quotaWindowPeriod, type QuotaUiStore } from "./quota-presentation.js";
 import { useQuotaData, useQuotaPreference, useQuotaChoicePreference } from "./quota-ui.js";
 import { panelStyles } from "./panel-styles.js";
 import { buildPoolRecovery, type PoolRecovery } from "./pool-recovery.js";
@@ -175,7 +175,7 @@ function WindowMeter({ window, now, mode }: { window: MeterWindow; now: number; 
       <div className="limits-meter-title">
         <span className="limits-meter-label" title={window.displayLabel ?? shortWindowLabel(label)}>{window.displayLabel ?? shortWindowLabel(label)}</span>
       </div>
-      <span className="limits-meter-number">{`${formatQuotaPercent(percent)}%`}</span>
+      <span className="limits-meter-number">{`${formatQuotaPercent(percent, window.pooled ? 1 : 0)}%`}</span>
     </div>
     <div className={`limits-meter-track${window.recovery && window.recovery.usedPercent > 0 ? " limits-meter-track--recovery" : ""}`} role="progressbar" aria-label={`${label} ${mode === "used" ? "已用" : "剩余"}额度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} title={`${label} · ${reset}`}>
       {window.recovery && window.recovery.usedPercent > 0 ? <RecoverySegments recovery={window.recovery} mode={mode} now={now} /> : <div className="limits-meter-fill" style={{ width: `${percent}%` }} />}
@@ -212,42 +212,74 @@ function ModelCap({ window, now, mode }: { window: MeterWindow; now: number; mod
       <span className="limits-cap-label">{modelWeeklyName(window.label)} 周上限</span>
       <span className="limits-cap-value" data-depleted={remaining <= 10 || undefined} role="progressbar"
         aria-label={`${window.label} ${mode === "used" ? "已用" : "剩余"}额度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}
-        aria-valuetext={`${mode === "used" ? "已用" : "剩余"} ${formatQuotaPercent(percent)}%，以 ${modelWeeklyName(window.label)} 自身周上限计算`}>
-        <span className="limits-cap-mode">{mode === "used" ? "已用" : "剩余"}</span> {formatQuotaPercent(percent)}%
+        aria-valuetext={`${mode === "used" ? "已用" : "剩余"} ${formatQuotaPercent(percent, window.pooled ? 1 : 0)}%，以 ${modelWeeklyName(window.label)} 自身周上限计算`}>
+        <span className="limits-cap-mode">{mode === "used" ? "已用" : "剩余"}</span> {formatQuotaPercent(percent, window.pooled ? 1 : 0)}%
       </span>
     </div>
     <p className="limits-reset">{window.detail ? `${reset} · ${window.detail}` : reset}</p>
   </li>;
 }
 
-/** Model limits constrain the same weekly usage; their percentages have separate denominators. */
+function SessionStatus({ window, now, mode }: { window: MeterWindow; now: number; mode: DisplayMode }) {
+  const remaining = remainingPercent(window.usedPercent);
+  const percent = mode === "used" ? 100 - remaining : remaining;
+  const label = displayWindowLabel(window);
+  return <li className="limits-session" data-exhausted={remaining === 0 || undefined} title={window.detail}>
+    <span className="limits-session-label">5h</span>
+    <span className="limits-session-value" role="progressbar" aria-label={`${label} ${mode === "used" ? "已用" : "剩余"}额度`}
+      aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>{mode === "used" ? "已用" : "剩余"} {formatQuotaPercent(percent, window.pooled ? 1 : 0)}%</span>
+    {remaining === 0 && <span className="limits-session-blocked">暂受限</span>}
+    <span className="limits-session-reset">{compactReset(window.resetsAt, now)}</span>
+    {window.detail && <span className="limits-session-detail">{window.detail}</span>}
+  </li>;
+}
+
+/** Weekly budgets lead; 5h and model caps remain distinct, subordinate constraints. */
 function QuotaWindows({ providerId, windows, now, mode }: {
   providerId: string; windows: readonly MeterWindow[]; now: number; mode: DisplayMode;
 }) {
   const ordered = orderQuotaWindows(windows).map(window => ({ ...window, label: displayWindowLabel(window), accountLabel: null, displayLabel: window.displayLabel ?? quotaWindowDisplayLabel(providerId, displayWindowLabel(window)) }));
   const claude = ["claude", "claude-code", "cliproxy-claude", "account-pool:claude-code"].includes(providerId);
   const modelWindows = claude ? ordered.filter(window => modelWeeklyName(window.label) !== null) : [];
-  if (modelWindows.length === 0) return <MeterList windows={ordered} now={now} mode={mode} />;
-  const totalWindows = ordered.filter(window => normalizeCliproxyWindow(window.label).id === "7d");
-  const otherWindows = ordered.filter(window => !totalWindows.includes(window) && !modelWindows.includes(window));
-  const exhausted = totalWindows.some(window => window.usedPercent >= 100);
-  return <div className={`limits-quotas${otherWindows.length ? " limits-quotas--weekly" : ""}`}>
-    {otherWindows.length > 0 && <MeterList windows={otherWindows} now={now} mode={mode} />}
-    <div role="group" aria-label="周额度" className="limits-weekly">
-      {totalWindows.length > 0
-        ? <MeterList windows={totalWindows.map(window => ({ ...window, displayLabel: "总周额度" }))} now={now} mode={mode} />
-        : <div className="limits-weekly-unknown"><span>总周额度</span><span className="limits-unknown-value">—</span><span className="limits-reset">总周额度未返回</span></div>}
-      {exhausted && <p className="limits-exhausted">总周额度已用尽</p>}
-      <div role="group" aria-label="模型周上限" className="limits-caps">
-        <ul>{modelWindows.map((window, index) => <ModelCap key={`${window.label}-${index}`} window={window} now={now} mode={mode} />)}</ul>
-      </div>
-    </div>
+  const groups = new Map<string, { weekly: MeterWindow[]; sessions: MeterWindow[] }>();
+  const getGroup = (family: string) => {
+    let group = groups.get(family);
+    if (!group) { group = { weekly: [], sessions: [] }; groups.set(family, group); }
+    return group;
+  };
+  const otherWindows: MeterWindow[] = [];
+  for (const window of ordered) {
+    if (modelWindows.includes(window)) continue;
+    const period = quotaWindowPeriod(window.label);
+    if (!period) { otherWindows.push(window); continue; }
+    const group = getGroup(period.family);
+    (period.period === "7d" ? group.weekly : group.sessions).push(window);
+  }
+  if (modelWindows.length) getGroup("");
+  if (!groups.size) return <MeterList windows={otherWindows} now={now} mode={mode} />;
+  return <div className="limits-budget-grid">
+    {[...groups].map(([family, group]) => {
+      const totalLabel = claude && !family ? "总周额度" : `${family ? `${family} ` : ""}周额度`;
+      return <div key={family} role="group" aria-label={family ? `${family} 周额度` : "周额度"} className="limits-weekly">
+        {group.weekly.length
+          ? <MeterList windows={group.weekly.map(window => ({ ...window, displayLabel: claude && !family ? "总周额度" : window.displayLabel }))} now={now} mode={mode} />
+          : <div className="limits-weekly-unknown"><span>{totalLabel}</span><span className="limits-unknown-value">—</span><span className="limits-reset">{totalLabel}未返回</span></div>}
+        {claude && !family && group.weekly.some(window => window.usedPercent >= 100) && <p className="limits-exhausted">总周额度已用尽</p>}
+        {group.sessions.length > 0 && <ul className="limits-sessions" aria-label={`${family ? `${family} ` : ""}5h 短期限制`}>
+          {group.sessions.map((window, index) => <SessionStatus key={`${window.label}-${index}`} window={window} now={now} mode={mode} />)}
+        </ul>}
+        {!family && modelWindows.length > 0 && <div role="group" aria-label="模型周上限" className="limits-caps">
+          <ul>{modelWindows.map((window, index) => <ModelCap key={`${window.label}-${index}`} window={window} now={now} mode={mode} />)}</ul>
+        </div>}
+      </div>;
+    })}
+    {otherWindows.length > 0 && <div className="limits-other-windows"><MeterList windows={otherWindows} now={now} mode={mode} /></div>}
   </div>;
 }
 
 function poolWindowDetail(window: PoolWindow, totalAccounts: number): string {
   const exhausted = window.exhausted > 0 ? ` · 全池 ${window.exhausted} 账号已耗尽` : "";
-  return `覆盖 ${window.accounts}/${totalAccounts}${exhausted}`;
+  return `${window.accounts} 个账号汇总 · 覆盖 ${window.accounts}/${totalAccounts}${exhausted}`;
 }
 
 function PoolUsage({ provider, now, mode }: { provider: PanelProvider; now: number; mode: DisplayMode }) {
@@ -531,7 +563,7 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
     {entries.length > 0 && <div className="limits-compact-services" aria-label="额度服务">
       {entries.map(entry => {
         const metrics = compactPoolSummaries(entry.provider, now).map(metric => ({ ...metric,
-          percent: metric.usedPercent === null ? null : formatQuotaPercent(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent),
+          percent: metric.usedPercent === null ? null : formatQuotaPercent(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent, 1),
           tone: metric.usedPercent === null ? "unknown" : metric.usedPercent >= 95 ? "critical" : metric.pace?.level === "conserve" || metric.pace?.level === "blocked" ? "warning" : metric.pace?.level === "generous" ? "generous" : metric.usedPercent >= 80 ? "warning" : "normal",
         }));
         const name = entry.name.replace(" (SDK)", "").replace(" · ", " ");

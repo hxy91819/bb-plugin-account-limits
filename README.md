@@ -55,6 +55,8 @@ Quota reminders default to enabled. Opening the app, or first enabling reminders
 
 Click or tap outside the compact disclosure to close it. Scrolling and internal settings keep it open; outside controls still receive their activation and retain input focus. The footer icon and Escape also close it through BB's existing controls.
 
+Weekly quota is the main meter in every view. Each matching 5h window appears below its own weekly/model-family quota as a small status with its percentage, reset time and any short-term exhaustion warning. Missing weekly data stays unknown, including compact summary cards. Pool capacity is always 100%: three equally weighted accounts used at 1%, 18% and 0% give 6.3% used for the pool. Pooled percentages retain one decimal and state how many reporting accounts were aggregated; incomplete coverage stays explicit.
+
 ## Optional CLI Proxy setup
 
 On each enrolled machine that should query a proxy, create `~/.config/bb/account-limits/local.json` (or `$XDG_CONFIG_HOME/bb/account-limits/local.json`). `ACCOUNT_LIMITS_LOCAL_CONFIG` can point to a different file.

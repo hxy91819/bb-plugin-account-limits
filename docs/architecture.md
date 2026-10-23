@@ -22,6 +22,10 @@ The domain types are `QuotaAccount`, `ProviderSnapshot`, `QuotaSourceId` and `Ac
 
 ## Required pool compatibility rule
 
+Weekly budgets lead the full and compact views. `quotaWindowPeriod` pairs raw and pooled 5h/weekly labels within the same model family and preserves model suffixes supplied by adapters. The shared renderer shows 5h as subordinate status, without a competing main bar, while retaining percentage, reset, coverage and exhaustion warnings. Missing weekly quota stays unknown and 5h never substitutes for it in compact summary cards. Claude model caps retain their separate denominators beneath the shared total week. These are presentation rules; source snapshots, window IDs, recovery and pacing calculations are unchanged.
+
+Every pool's complete capacity is 100%. The existing weighted mean remains authoritative; pooled percentages display up to one decimal and explicitly count the accounts reporting each window. For equal weights, 1%, 18% and 0% used become 6.3% used of the three-account pool, not 19% of the pool. Coverage still excludes missing observations and identifies partial results; no absolute token capacity or independent subscription count is inferred.
+
 Pool accounts only within the same account type and subscription tier. Different types or tiers must remain separate even when they share a source, provider or quota-window name: Google AI Ultra and Google AI Pro are separate pools. Capacity weights do not make different tiers compatible.
 
 Apply this boundary before computing percentages, reset/recovery forecasts and weekly pacing. The full dashboard, compact service cards and exposed pool summaries must use the same grouping, while retaining the existing source, model-family and missing-total-week boundaries.

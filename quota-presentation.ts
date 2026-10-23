@@ -1,5 +1,5 @@
 import type { AccountLimitsPanelSnapshot, AccountLimitsReadInput, QuotaAccount } from "./contract.js";
-import { aggregateCliproxyPool, groupAccountPools, type PoolWindow } from "./pool.js";
+import { aggregateCliproxyPool, groupAccountPools, normalizeCliproxyWindow, type PoolWindow } from "./pool.js";
 import { buildWeeklyPace, isWeeklyBudget, type WeeklyPace } from "./weekly-pace.js";
 
 /** Pool precedence affects presentation and reminders only; raw observations stay intact. */
@@ -148,11 +148,21 @@ export function quotaWindowDisplayLabel(providerId: string, label: string): stri
 }
 
 /** Avoid displaying a positive near-boundary fraction as exactly empty or full. */
-export function formatQuotaPercent(value: number): string {
+export function formatQuotaPercent(value: number, precision: 0 | 1 = 0): string {
   if (value > 0 && value < 0.1) return "<0.1";
   if (value > 99.9 && value < 100) return ">99.9";
-  if (value > 0 && value < 1 || value > 99 && value < 100) return String(Number(value.toFixed(1)));
+  if (precision === 1 || value > 0 && value < 1 || value > 99 && value < 100) return String(Number(value.toFixed(1)));
   return String(Math.round(value));
+}
+
+/** Presentation pairing only: preserve the model suffix added by source adapters. */
+export function quotaWindowPeriod(label: string): { family: string; period: "5h" | "7d" } | null {
+  const separator = label.indexOf(" · ");
+  const base = separator < 0 ? label : label.slice(0, separator);
+  const model = separator < 0 ? "" : label.slice(separator + 3);
+  const match = /^(?:(.+) )?(5h|7d)$/u.exec(base)
+    ?? /^(?:(.+) )?(5h|7d)$/u.exec(normalizeCliproxyWindow(base).id);
+  return match ? { family: [match[1], model].filter(Boolean).join(" · "), period: match[2] as "5h" | "7d" } : null;
 }
 
 export interface CompactPoolSummary {
@@ -196,7 +206,10 @@ export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machi
     if (pool.status !== "ok" || !pool.windows.length) return [];
     const weekly = pool.windows.filter(window => isWeeklyBudget(window.label));
     const cursor = pool.windows.filter(window => quotaWindowDisplayLabel(provider.id, window.label) !== undefined);
-    const tightest = pool.windows.reduce((a, b) => a.usedPercent >= b.usedPercent ? a : b);
+    const primary = pool.windows.filter(window => quotaWindowPeriod(window.label)?.period !== "5h");
+    if (!primary.length) return [{ key: `${group.id}:weekly-unknown`, label: "周未报", fullLabel: "周额度未返回", usedPercent: null,
+      detail: `${group.accounts.length} 个账号仅返回 5h 窗口，周额度未知`, pace: null, partial: false }];
+    const tightest = primary.reduce((a, b) => a.usedPercent >= b.usedPercent ? a : b);
     const selected = cursor.length ? cursor : weekly.length ? weekly : [tightest];
     return selected.map((window: PoolWindow) => {
       const cursorLabel = quotaWindowDisplayLabel(provider.id, window.label);
@@ -206,7 +219,7 @@ export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machi
       const pace = isWeeklyBudget(window.label) ? buildWeeklyPace(group.accounts, window.id, now, provider.updatedAt) : null;
       const partial = window.accounts < typeAccounts.length;
       return { key: `${group.id}:${window.id}`, label, fullLabel, usedPercent: window.usedPercent, partial,
-        detail: `覆盖 ${window.accounts}/${typeAccounts.length}${group.label ? ` · ${group.label}` : ""}${missingWeekly && isWeeklyBudget(window.label) ? ` · ${missingWeekly} 个账号未返回总周额度` : ""}${partial ? " · * 仅统计已返回该窗口的账号，不代表全池额度" : ""}`,
+        detail: `${window.accounts} 个账号汇总 · 覆盖 ${window.accounts}/${typeAccounts.length}${group.label ? ` · ${group.label}` : ""}${missingWeekly && isWeeklyBudget(window.label) ? ` · ${missingWeekly} 个账号未返回总周额度` : ""}${partial ? " · * 仅统计已返回该窗口的账号，不代表全池额度" : ""}`,
         pace };
     });
   });

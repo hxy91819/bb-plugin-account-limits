@@ -2,6 +2,9 @@
 
 ## 0.4.0
 
+- Lead with weekly quota in all views and sources; show matching 5h limits as secondary status, retain exhausted-session warnings and keep missing weeks unknown.
+- Show pooled percentages to one decimal and name the reporting-account count; full-pool capacity remains 100%, including compact cards.
+
 - Close the compact disclosure on outside clicks/taps without intercepting scrolling, internal controls or the native footer toggle; preserve focus on outside inputs.
 
 - Use BB's single sidebar scroll viewport for compact quotas, avoiding nested scrolling and interrupted gestures in long account lists.

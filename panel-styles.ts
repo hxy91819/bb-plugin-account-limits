@@ -115,9 +115,19 @@ export const panelStyles = `
 .limits-panel .limits-next-reset-state[data-state=unknown] { font-weight: 400; color: var(--muted-foreground); }
 .limits-panel .limits-next-reset-priority { display: inline-block; margin-left: 7px; color: color-mix(in srgb, var(--primary) 60%, var(--foreground)); font-weight: 550; }
 .limits-panel .limits-pool-coverage { margin-top: 1px; font-size: 10px; }
-.limits-panel .limits-quotas { min-width: 0; }
-.limits-panel .limits-quotas--weekly { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 24px; }
+.limits-panel .limits-budget-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 20px 24px; min-width: 0; }
+.limits-panel .limits-other-windows { grid-column: 1 / -1; min-width: 0; }
 .limits-panel .limits-weekly { min-width: 0; }
+.limits-panel .limits-sessions { margin-top: 9px; padding-top: 7px; border-top: 1px solid var(--limits-line); }
+.limits-panel .limits-session { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; color: var(--muted-foreground); font-size: 10px; line-height: 1.7; font-variant-numeric: tabular-nums; }
+.limits-panel .limits-session + .limits-session { margin-top: 5px; }
+.limits-panel .limits-session-label { white-space: nowrap; }
+.limits-panel .limits-session-label::before { content: '↳'; margin-right: 5px; opacity: .6; }
+.limits-panel .limits-session-value { white-space: nowrap; }
+.limits-panel .limits-session-reset { overflow-wrap: anywhere; }
+.limits-panel .limits-session-detail { font-size: 9px; }
+.limits-panel .limits-session-blocked { padding: 0 4px; border-radius: 3px; color: var(--warning-text); background: color-mix(in srgb, var(--warning) 10%, var(--card)); }
+.limits-panel .limits-session[data-exhausted] .limits-session-value { color: var(--warning-text); }
 .limits-panel .limits-weekly-unknown { display: grid; grid-template-columns: 1fr auto; color: var(--muted-foreground); font-size: 11px; }
 .limits-panel .limits-unknown-value { font-size: 17px; line-height: 1.1; }
 .limits-panel .limits-weekly-unknown .limits-reset { grid-column: 1 / -1; margin-top: 12px; }
@@ -147,7 +157,7 @@ export const panelStyles = `
   .limits-panel .limits-shell { padding: 20px 16px 36px; }
   .limits-panel .limits-overview { gap: 18px; }
   .limits-panel .limits-account { grid-template-columns: minmax(135px, .8fr) minmax(0, 2fr); gap: 18px; }
-  .limits-panel .limits-meters, .limits-panel .limits-quotas--weekly { gap: 14px; }
+  .limits-panel .limits-meters, .limits-panel .limits-budget-grid { gap: 14px; }
   .limits-panel .limits-provider-body { padding: 0 16px; }
   .limits-panel .limits-provider-head { padding: 14px 16px; }
 }
@@ -235,7 +245,9 @@ export const panelStyles = `
 .limits-compact .limits-pool { padding: 0; }
 .limits-compact .limits-account { display: block; padding: 0; border: 0; background: transparent; }
 .limits-compact .limits-meters { grid-template-columns: minmax(0, 1fr) !important; gap: 12px; }
-.limits-compact .limits-quotas, .limits-compact .limits-quotas--weekly { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+.limits-compact .limits-budget-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
+.limits-compact .limits-sessions { margin-top: 7px; padding-top: 5px; }
+.limits-compact .limits-session { font-size: 9px; gap: 1px 6px; }
 .limits-compact .limits-weekly { padding: 0; border: 0; background: transparent; }
 .limits-compact .limits-meter { padding: 0; }
 .limits-compact .limits-meter-heading { margin-bottom: 6px; }
