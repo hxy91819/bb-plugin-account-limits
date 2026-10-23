@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Close the compact disclosure on outside clicks/taps without intercepting scrolling, internal controls or the native footer toggle; preserve focus on outside inputs.
+
 - Use BB's single sidebar scroll viewport for compact quotas, avoiding nested scrolling and interrupted gestures in long account lists.
 
 - Separate subscription tiers before pool aggregation across full/compact views, weekly pacing, reset forecasts and public quota resources; keep Google AI Ultra and Pro in distinct pools.

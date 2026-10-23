@@ -1,4 +1,4 @@
-import { useEffect, useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import { definePluginApp, experimental_Icon as BbIcon, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
@@ -461,6 +461,39 @@ function AccountLimitsPanel({ store }: { store: QuotaUiStore }) {
 }
 
 function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void }) {
+  const panelRef = useRef<HTMLElement>(null);
+  useEffect(() => {
+    const panel = panelRef.current;
+    if (!panel) return;
+    const owner = panel.ownerDocument;
+    let disposed = false;
+    let restoreOutsideFocus: HTMLElement | null = null;
+    const onOutsideClick = (event: MouseEvent) => {
+      if (event.button !== 0 || event.composedPath().includes(panel)) return;
+      // Capture avoids consuming the click that mounts us. Defer closing until
+      // the host's footer toggle has run, so it cannot immediately reopen us.
+      queueMicrotask(() => {
+        if (disposed || !panel.isConnected) return;
+        const focused = owner.activeElement;
+        // BB restores focus to its trigger on dismissal. Preserve the target
+        // the user just activated; passive unmount cleanup runs after the host's
+        // layout focus restoration, so it does not steal input/composer focus.
+        if (focused instanceof HTMLElement && focused !== owner.body && !panel.contains(focused)) {
+          restoreOutsideFocus = focused;
+        }
+        dismiss();
+      });
+    };
+    // Native click excludes touch scrolling; no touch/pointer default is blocked.
+    owner.addEventListener("click", onOutsideClick, true);
+    return () => {
+      disposed = true;
+      owner.removeEventListener("click", onOutsideClick, true);
+      if (restoreOutsideFocus?.isConnected && owner.activeElement !== restoreOutsideFocus) {
+        restoreOutsideFocus.focus({ preventScroll: true });
+      }
+    };
+  }, [dismiss]);
   const { snapshot: rawSnapshot, error, loading, refresh } = useQuotaData(store);
   const [hideFailures, setHideFailures] = useQuotaPreference("hide-failures");
   const [reminders, setReminders] = useQuotaPreference("reminders");
@@ -478,7 +511,7 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
       name: `${provider.displayName}${type.label ? ` · ${type.label.replace(/^Google AI /iu, "")}` : ""}`,
     })))) ?? [];
   const active = entries.find(entry => entry.key === selected) ?? entries[0];
-  return <section className="limits-panel limits-compact" aria-label="账户额度精简版">
+  return <section ref={panelRef} className="limits-panel limits-compact" aria-label="账户额度精简版">
     <style>{panelStyles}</style>
     <header className="limits-compact-head">
       <span className="limits-compact-brand"><QuotaMark /><strong>账户额度</strong></span>

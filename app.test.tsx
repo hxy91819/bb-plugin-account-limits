@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { test } from "node:test";
 import { JSDOM } from "jsdom";
-import { act } from "react";
+import { act, useLayoutEffect, useState } from "react";
 import { within } from "@testing-library/react";
 import { installTestPluginRuntime, loadPluginApp, renderSlot } from "@get-bb/plugin-sdk/testing/app";
 import type { AccountLimitsPanelSnapshot } from "./contract.js";
@@ -645,8 +645,9 @@ test("sidebar compact view shares data and preferences with full page and opens 
   await act(async () => { compact.getByRole("checkbox", { name: "隐藏失败" }).click(); });
   assert.ok(within(compact.container).getByText("Failed"));
   assert.ok(within(full.container).getByText("Failed"));
+  const beforeOpenFull = dismissed;
   await act(async () => { compact.getByRole("button", { name: "完整页面" }).click(); });
-  assert.equal(dismissed, 1);
+  assert.equal(dismissed, beforeOpenFull + 1);
   assert.equal(compact.inspection.navigateCalls.length, 1);
 });
 
@@ -1120,4 +1121,89 @@ test("Ultra and Pro stay separate in full pools, compact cards, reset batches an
   await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
   assert.equal(ultraCard.querySelectorAll("strong")[0]!.textContent, "90%");
   assert.equal(proCard.querySelectorAll("strong")[0]!.textContent, "20%");
+});
+
+test("compact disclosure closes on outside activation without swallowing clicks", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact disclosure");
+  const outside = document.createElement("input");
+  document.body.append(outside);
+  let dismissed = 0; let activated = 0;
+  outside.addEventListener("click", () => { activated++; });
+  const slot = renderSlot(footer, { dismiss: () => { dismissed++; } }, { rpc: { readAccountLimits: () => ({ machines: [] }) } });
+  t.after(() => { slot.lifecycle.unmount(); outside.remove(); dom.window.localStorage.clear(); });
+  await slot.findByLabelText("额度显示设置");
+  await act(async () => { slot.getByLabelText("额度显示设置").click(); });
+  await act(async () => { slot.getByRole("checkbox", { name: "隐藏失败" }).click(); });
+  assert.equal(dismissed, 0, "Settings and other internal controls keep the disclosure open");
+  await act(async () => {
+    for (const type of ["touchstart", "touchmove", "touchend", "pointercancel"]) {
+      outside.dispatchEvent(new dom.window.Event(type, { bubbles: true }));
+    }
+  });
+  assert.equal(dismissed, 0, "Scrolling does not activate outside dismissal");
+  await act(async () => { outside.focus(); outside.click(); });
+  assert.equal(dismissed, 1);
+  assert.equal(activated, 1, "The outside input still receives its click");
+  assert.equal(document.activeElement, outside, "The outside input remains focused");
+});
+
+test("outside dismissal waits for the native footer toggle and does not consume the opening click", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact disclosure");
+  const trigger = document.createElement("button"); document.body.append(trigger);
+  let opened = false; let dismissed = 0;
+  let slot: ReturnType<typeof renderSlot> | undefined;
+  trigger.addEventListener("click", () => {
+    opened = !opened;
+    if (opened && !slot) slot = renderSlot(footer, { dismiss: () => { opened = false; dismissed++; } }, { rpc: { readAccountLimits: () => ({ machines: [] }) } });
+  });
+  t.after(() => { slot?.lifecycle.unmount(); trigger.remove(); dom.window.localStorage.clear(); });
+  await act(async () => { trigger.click(); });
+  assert.equal(opened, true); assert.equal(dismissed, 0);
+  await act(async () => { trigger.click(); });
+  assert.equal(opened, false, "The host toggle must not reopen after outside dismissal");
+  assert.equal(dismissed, 1);
+});
+
+test("outside dismissal removes listeners and abandons queued work on compact unmount", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact disclosure");
+  const outside = document.createElement("button"); document.body.append(outside);
+  let dismissed = 0;
+  const render = () => renderSlot(footer, { dismiss: () => { dismissed++; } }, { rpc: { readAccountLimits: () => ({ machines: [] }) } });
+  let slot = render();
+  t.after(() => { slot.lifecycle.unmount(); outside.remove(); dom.window.localStorage.clear(); });
+  await act(async () => { outside.click(); slot.lifecycle.unmount(); });
+  assert.equal(dismissed, 0);
+  await act(async () => { outside.click(); });
+  assert.equal(dismissed, 0);
+  slot = render();
+  await act(async () => { outside.click(); });
+  assert.equal(dismissed, 1, "Remounting must install only one live listener");
+});
+
+test("outside activation keeps input focus after the host closes and restores its trigger", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact disclosure");
+  const Component = footer.component;
+  const input = document.createElement("input"), trigger = document.createElement("button");
+  document.body.append(input, trigger);
+  const slot = renderSlot({ ...footer, component: function Host() {
+    const [open, setOpen] = useState(true);
+    useLayoutEffect(() => { if (!open) trigger.focus(); }, [open]);
+    return open ? <Component dismiss={() => setOpen(false)} /> : null;
+  } }, { dismiss() {} }, { rpc: { readAccountLimits: () => ({ machines: [] }) } });
+  t.after(() => { slot.lifecycle.unmount(); input.remove(); trigger.remove(); dom.window.localStorage.clear(); });
+  await act(async () => { input.focus(); input.click(); });
+  assert.equal(slot.queryByLabelText("账户额度精简版"), null);
+  assert.equal(document.activeElement, input);
 });

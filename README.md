@@ -53,6 +53,8 @@ Click the bottom-left **账户额度** icon to open the disclosure; startup and 
 
 Quota reminders default to enabled. Opening the app, or first enabling reminders, establishes a quiet baseline from the first usable snapshot; existing low quota stays visible in the panel without a startup toast. Later observations crossing 80% or 95% used produce one toast per threshold crossing per window. The browser stores reminder history locally, so refreshing or reopening the same BB site does not repeat an unchanged warning. Recovering below a threshold or a new known reset cycle re-arms it. If browser storage is unavailable, deduplication lasts for the current page only. Cached source failures and overdue windows do not create alerts. While the app is visible, a shared monitor checks every five minutes, including with the disclosure closed. You can disable reminders in either view. To replace BB's official usage display on this installation, disable `bb--provider-usage`; providers themselves remain enabled.
 
+Click or tap outside the compact disclosure to close it. Scrolling and internal settings keep it open; outside controls still receive their activation and retain input focus. The footer icon and Escape also close it through BB's existing controls.
+
 ## Optional CLI Proxy setup
 
 On each enrolled machine that should query a proxy, create `~/.config/bb/account-limits/local.json` (or `$XDG_CONFIG_HOME/bb/account-limits/local.json`). `ACCOUNT_LIMITS_LOCAL_CONFIG` can point to a different file.
