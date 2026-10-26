@@ -2,6 +2,10 @@
 
 ## 0.4.0
 
+- Put subscription tiers first in readable, wrapping compact cards; keep model labels on one line and expose used/remaining and account/pool controls directly.
+- Explain partial quota coverage in selected-card details, show full cohort counts once, and retain explicit coverage only for incomplete windows.
+- Unify card/meter color priority, secondary quota rows and touch-friendly inline explanations; enlarge mobile action targets without additional quota requests.
+
 - Align 5h and model-weekly cap secondary rows at 11px in the full panel and 10px in the compact sidebar, with matching 1.6 line-height, numeric weight and coverage detail sizing.
 
 - Highlight near-reset quota that can be used more freely before the separate pool-wide pace badge, without changing pool ratings or routing.

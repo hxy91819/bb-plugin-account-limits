@@ -206,6 +206,17 @@ export function quotaWindowPeriod(label: string): { family: string; period: "5h"
   return match ? { family: [match[1], model].filter(Boolean).join(" · "), period: match[2] as "5h" | "7d" } : null;
 }
 
+export type QuotaTone = "unknown" | "critical" | "warning" | "generous" | "normal";
+
+export function quotaTone(usedPercent: number | null, pace?: WeeklyPace | null): QuotaTone {
+  if (usedPercent === null || Number.isNaN(usedPercent)) return "unknown";
+  if (usedPercent >= 90) return "critical";
+  if (pace?.level === "blocked" || pace?.level === "conserve") return "warning";
+  if (pace?.level === "generous") return "generous";
+  if (usedPercent >= 80) return "warning";
+  return "normal";
+}
+
 export interface CompactPoolSummary {
   key: string;
   label: string;
@@ -215,6 +226,9 @@ export interface CompactPoolSummary {
   pace: WeeklyPace | null;
   /** Only reporting accounts enter the denominator; missing observations are excluded. */
   partial: boolean;
+  reportingAccounts: number;
+  totalAccounts: number;
+  missingWeeklyAccounts: number;
 }
 
 /** Service cards always describe a pool, independent of the expanded account view. */
@@ -228,14 +242,16 @@ export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machi
     const hasReportedWeek = compatibleGroups.some(other => other.kind !== "without-weekly" && other.accounts.some(account =>
       account.usage.status === "ok" && account.usage.windows.some(window => isWeeklyBudget(window.label))));
     if (group.kind === "without-weekly") return hasReportedWeek ? [] : [{ key: group.id, label: "周未报", fullLabel: "总周额度未返回", usedPercent: null,
-      detail: `${group.accounts.length} 个账号未返回总周额度，独立统计${group.typeLabel ? ` · ${group.typeLabel}` : ""}`, pace: null, partial: false }];
+      detail: `${group.accounts.length} 个账号未返回总周额度，独立统计${group.typeLabel ? ` · ${group.typeLabel}` : ""}`, pace: null, partial: false,
+      reportingAccounts: 0, totalAccounts: typeAccounts.length, missingWeeklyAccounts: missingWeekly }];
     const pool = aggregateCliproxyPool(group.accounts);
     if (pool.status !== "ok" || !pool.windows.length) return [];
     const weekly = pool.windows.filter(window => isWeeklyBudget(window.label));
     const cursor = pool.windows.filter(window => quotaWindowDisplayLabel(provider.id, window.label) !== undefined);
     const primary = pool.windows.filter(window => quotaWindowPeriod(window.label)?.period !== "5h");
     if (!primary.length) return [{ key: `${group.id}:weekly-unknown`, label: "周未报", fullLabel: "周额度未返回", usedPercent: null,
-      detail: `${group.accounts.length} 个账号仅返回 5h 窗口，周额度未知`, pace: null, partial: false }];
+      detail: `${group.accounts.length} 个账号仅返回 5h 窗口，周额度未知`, pace: null, partial: false,
+      reportingAccounts: 0, totalAccounts: typeAccounts.length, missingWeeklyAccounts: missingWeekly }];
     const tightest = primary.reduce((a, b) => a.usedPercent >= b.usedPercent ? a : b);
     const selected = cursor.length ? cursor : weekly.length ? weekly : [tightest];
     return selected.map((window: PoolWindow) => {
@@ -246,6 +262,9 @@ export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machi
       const pace = isWeeklyBudget(window.label) ? buildWeeklyPace(group.accounts, window.id, now, provider.updatedAt) : null;
       const partial = window.accounts < typeAccounts.length;
       return { key: `${group.id}:${window.id}`, label, fullLabel, usedPercent: window.usedPercent, partial,
+        reportingAccounts: window.accounts,
+        totalAccounts: typeAccounts.length,
+        missingWeeklyAccounts: isWeeklyBudget(window.label) ? missingWeekly : 0,
         detail: `${window.accounts} 个账号汇总 · 覆盖 ${window.accounts}/${typeAccounts.length}${group.label ? ` · ${group.label}` : ""}${missingWeekly && isWeeklyBudget(window.label) ? ` · ${missingWeekly} 个账号未返回总周额度` : ""}${partial ? " · * 仅统计已返回该窗口的账号，不代表全池额度" : ""}`,
         pace };
     });

@@ -1,7 +1,8 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowPeriod, quotaAlerts } from "./quota-presentation.js";
+import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowPeriod, quotaAlerts, quotaTone } from "./quota-presentation.js";
 import type { AccountLimitsPanelSnapshot } from "./contract.js";
+import type { WeeklyPace } from "./weekly-pace.js";
 
 const snapshot = (usedPercent = 85, includeFailure = false): AccountLimitsPanelSnapshot => ({ machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
   providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
@@ -443,4 +444,191 @@ test("empty Claude observations block their tier across weekly-availability subp
   const recovered = structuredClone(valid); const low = recovered.machines[0]!.providers[0]!.accounts[1]!.usage;
   if (low.status !== "ok") throw new Error("Fixture"); low.windows[0]!.usedPercent = 70;
   assert.equal(track(recovered).length, 1, "Recovering a complete Pro cohort retains its earlier threshold history");
+});
+
+const fakePace = (level: WeeklyPace["level"]): WeeklyPace => ({
+  level,
+  label: level,
+  reason: "mock",
+  expiringAccounts: [],
+  expiringRemainingPercent: 0,
+});
+
+test("quotaTone evaluates priority boundaries across thresholds and pace signals", () => {
+  // 未知：null 或 NaN 返回 unknown
+  assert.equal(quotaTone(null), "unknown");
+  assert.equal(quotaTone(null, fakePace("generous")), "unknown");
+  assert.equal(quotaTone(null, fakePace("blocked")), "unknown");
+  assert.equal(quotaTone(NaN), "unknown");
+
+  // <=10% 危险优先：usedPercent >= 90 时，即使 pace 宽裕或受限，也必须返回 critical
+  assert.equal(quotaTone(90), "critical");
+  assert.equal(quotaTone(90, fakePace("generous")), "critical");
+  assert.equal(quotaTone(90, fakePace("blocked")), "critical");
+  assert.equal(quotaTone(95), "critical");
+  assert.equal(quotaTone(100), "critical");
+
+  // 受限警告：pace.level 为 blocked 或 conserve 时返回 warning（在 usedPercent < 90 时）
+  assert.equal(quotaTone(50, fakePace("blocked")), "warning");
+  assert.equal(quotaTone(50, fakePace("conserve")), "warning");
+  assert.equal(quotaTone(0, fakePace("blocked")), "warning");
+
+  // 宽裕 19% 余量优先绿色（usedPercent = 81，余量 19%）：
+  // 在 usedPercent >= 80 的情况下，若 pace 为 generous，优先返回 generous
+  assert.equal(quotaTone(81, fakePace("generous")), "generous");
+  assert.equal(quotaTone(89.9, fakePace("generous")), "generous");
+  assert.equal(quotaTone(50, fakePace("generous")), "generous");
+
+  // 颜色边界 80：
+  // 当 usedPercent >= 80 且 pace 非 generous 且非 blocked/conserve 时，返回 warning
+  assert.equal(quotaTone(81), "warning");
+  assert.equal(quotaTone(81, fakePace("normal")), "warning");
+  assert.equal(quotaTone(80), "warning");
+  assert.equal(quotaTone(80, fakePace("normal")), "warning");
+
+  // 正常范围：usedPercent < 80 且 pace 为 normal 或无 pace
+  assert.equal(quotaTone(79.9), "normal");
+  assert.equal(quotaTone(79.9, fakePace("normal")), "normal");
+  assert.equal(quotaTone(0), "normal");
+});
+
+test("compactPoolSummaries accurately reflects reporting, total, and missing-weekly counts across tiers and models", () => {
+  const now = Date.now();
+
+  // 1. Claude 同类型 6/7 覆盖含 1 缺总周
+  const claudeProvider = snapshot().machines[0]!.providers[0]!;
+  claudeProvider.id = "cliproxy-claude";
+  const makeClaudeAccount = (key: string, hasWeekly: boolean, usedPercent = 30) => ({
+    key,
+    label: key,
+    weight: 1,
+    usage: {
+      status: "ok" as const,
+      planLabel: "Team",
+      windows: [
+        { label: "5-hour limit", usedPercent: 50, resetsAt: null },
+        ...(hasWeekly ? [{ label: "Weekly limit", usedPercent, resetsAt: null }] : [{ label: "Weekly scoped limit", usedPercent: 40, resetsAt: null }]),
+      ],
+    },
+  });
+  claudeProvider.accounts = [
+    makeClaudeAccount("acc-1", true, 10),
+    makeClaudeAccount("acc-2", true, 20),
+    makeClaudeAccount("acc-3", true, 30),
+    makeClaudeAccount("acc-4", true, 40),
+    makeClaudeAccount("acc-5", true, 50),
+    makeClaudeAccount("acc-6", true, 60),
+    makeClaudeAccount("acc-7", false),
+  ];
+
+  const claudeSummaries = compactPoolSummaries(claudeProvider, now);
+  assert.equal(claudeSummaries.length, 1);
+  const weekSummary = claudeSummaries[0]!;
+  assert.equal(weekSummary.label, "周");
+  assert.equal(weekSummary.usedPercent, 35);
+  assert.equal(weekSummary.reportingAccounts, 6);
+  assert.equal(weekSummary.totalAccounts, 7);
+  assert.equal(weekSummary.missingWeeklyAccounts, 1);
+  assert.equal(weekSummary.partial, true);
+
+  // 2. 跨套餐覆盖隔离
+  claudeProvider.accounts = [
+    { key: "pro-1", label: "pro-1", weight: 1, usage: { status: "ok" as const, planLabel: "Pro", windows: [{ label: "Weekly limit", usedPercent: 40, resetsAt: null }] } },
+    { key: "pro-2", label: "pro-2", weight: 1, usage: { status: "ok" as const, planLabel: "Pro", windows: [{ label: "Weekly limit", usedPercent: 60, resetsAt: null }] } },
+    { key: "team-1", label: "team-1", weight: 1, usage: { status: "ok" as const, planLabel: "Team", windows: [{ label: "Weekly limit", usedPercent: 30, resetsAt: null }] } },
+    { key: "team-2", label: "team-2", weight: 1, usage: { status: "ok" as const, planLabel: "Team", windows: [{ label: "Weekly limit", usedPercent: 50, resetsAt: null }] } },
+    { key: "team-3", label: "team-3", weight: 1, usage: { status: "ok" as const, planLabel: "Team", windows: [{ label: "Weekly scoped limit", usedPercent: 20, resetsAt: null }] } },
+  ];
+  const tierSummaries = compactPoolSummaries(claudeProvider, now);
+  assert.equal(tierSummaries.length, 2);
+  const proSummary = tierSummaries.find(s => s.key.startsWith("type-pro:"))!;
+  const teamSummary = tierSummaries.find(s => s.key.startsWith("type-team:"))!;
+  assert.ok(proSummary);
+  assert.ok(teamSummary);
+  assert.equal(proSummary.reportingAccounts, 2);
+  assert.equal(proSummary.totalAccounts, 2);
+  assert.equal(proSummary.missingWeeklyAccounts, 0);
+  assert.equal(proSummary.partial, false);
+  assert.equal(proSummary.usedPercent, 50);
+  assert.equal(teamSummary.reportingAccounts, 2);
+  assert.equal(teamSummary.totalAccounts, 3);
+  assert.equal(teamSummary.missingWeeklyAccounts, 1);
+  assert.equal(teamSummary.partial, true);
+  assert.equal(teamSummary.usedPercent, 40);
+
+  // 3. 模型族覆盖隔离
+  const antiProvider = snapshot().machines[0]!.providers[0]!;
+  antiProvider.id = "cliproxy-antigravity";
+  antiProvider.accounts = [
+    {
+      key: "anti-1", label: "anti-1", weight: 1,
+      usage: {
+        status: "ok" as const, planLabel: null,
+        windows: [
+          { label: "Gemini Models: Weekly limit", usedPercent: 20, resetsAt: null },
+        ],
+      },
+    },
+    {
+      key: "anti-2", label: "anti-2", weight: 1,
+      usage: {
+        status: "ok" as const, planLabel: null,
+        windows: [
+          { label: "Gemini Models: Weekly limit", usedPercent: 40, resetsAt: null },
+          { label: "Claude and GPT models: Weekly limit", usedPercent: 70, resetsAt: null },
+        ],
+      },
+    },
+  ];
+  const modelFamilySummaries = compactPoolSummaries(antiProvider, now);
+  assert.equal(modelFamilySummaries.length, 2);
+  const gemSummary = modelFamilySummaries.find(s => s.label === "Gem周")!;
+  const cgSummary = modelFamilySummaries.find(s => s.label === "C/G周")!;
+  assert.ok(gemSummary);
+  assert.ok(cgSummary);
+  assert.equal(gemSummary.reportingAccounts, 2);
+  assert.equal(gemSummary.totalAccounts, 2);
+  assert.equal(gemSummary.missingWeeklyAccounts, 0);
+  assert.equal(gemSummary.partial, false);
+  assert.equal(gemSummary.usedPercent, 30);
+  assert.equal(cgSummary.reportingAccounts, 1);
+  assert.equal(cgSummary.totalAccounts, 2);
+  assert.equal(cgSummary.missingWeeklyAccounts, 0);
+  assert.equal(cgSummary.partial, true);
+  assert.equal(cgSummary.usedPercent, 70);
+
+  // 4. 未知周摘要 0 覆盖
+  // Case A: Claude 全体缺少总周额度
+  const claudeUnknown = snapshot().machines[0]!.providers[0]!;
+  claudeUnknown.id = "cliproxy-claude";
+  claudeUnknown.accounts = [
+    { key: "c1", label: "c1", weight: 1, usage: { status: "ok" as const, planLabel: "Team", windows: [{ label: "Weekly scoped limit", usedPercent: 30, resetsAt: null }] } },
+    { key: "c2", label: "c2", weight: 1, usage: { status: "ok" as const, planLabel: "Team", windows: [{ label: "Weekly scoped limit", usedPercent: 50, resetsAt: null }] } },
+  ];
+  const unknownClaudeSummaries = compactPoolSummaries(claudeUnknown, now);
+  assert.equal(unknownClaudeSummaries.length, 1);
+  assert.equal(unknownClaudeSummaries[0]!.label, "周未报");
+  assert.equal(unknownClaudeSummaries[0]!.fullLabel, "总周额度未返回");
+  assert.equal(unknownClaudeSummaries[0]!.usedPercent, null);
+  assert.equal(unknownClaudeSummaries[0]!.reportingAccounts, 0);
+  assert.equal(unknownClaudeSummaries[0]!.totalAccounts, 2);
+  assert.equal(unknownClaudeSummaries[0]!.missingWeeklyAccounts, 2);
+  assert.equal(unknownClaudeSummaries[0]!.partial, false);
+
+  // Case B: 仅返回 5h 窗口的非 Claude 账号，周额度未知
+  const shortOnly = snapshot().machines[0]!.providers[0]!;
+  shortOnly.id = "bb-codex";
+  shortOnly.accounts = [
+    { key: "cx1", label: "cx1", weight: 1, usage: { status: "ok" as const, planLabel: null, windows: [{ label: "5-hour limit", usedPercent: 10, resetsAt: null }] } },
+    { key: "cx2", label: "cx2", weight: 1, usage: { status: "ok" as const, planLabel: null, windows: [{ label: "5-hour limit", usedPercent: 20, resetsAt: null }] } },
+  ];
+  const unknownShortSummaries = compactPoolSummaries(shortOnly, now);
+  assert.equal(unknownShortSummaries.length, 1);
+  assert.equal(unknownShortSummaries[0]!.label, "周未报");
+  assert.equal(unknownShortSummaries[0]!.fullLabel, "周额度未返回");
+  assert.equal(unknownShortSummaries[0]!.usedPercent, null);
+  assert.equal(unknownShortSummaries[0]!.reportingAccounts, 0);
+  assert.equal(unknownShortSummaries[0]!.totalAccounts, 2);
+  assert.equal(unknownShortSummaries[0]!.missingWeeklyAccounts, 0);
+  assert.equal(unknownShortSummaries[0]!.partial, false);
 });

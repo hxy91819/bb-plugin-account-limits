@@ -314,8 +314,8 @@ test("Claude 池视图把没有全模型周额度的账号单独合并，两种�
     assert.equal(regular.getByRole("progressbar", { name: "7d 剩余额度" }).getAttribute("aria-valuenow"), "50");
     assert.equal(withoutWeekly.queryByRole("progressbar", { name: "7d 剩余额度" }), null);
     assert.equal(withoutWeekly.getByRole("progressbar", { name: "scoped 剩余额度" }).getAttribute("aria-valuenow"), "90");
-    assert.ok(regular.getAllByText(/覆盖 2\/2/).length > 0);
-    assert.ok(withoutWeekly.getAllByText(/覆盖 2\/2/).length > 0);
+    assert.ok(regular.getAllByText(/2 个账号汇总/).length > 0);
+    assert.ok(withoutWeekly.getAllByText(/2 个账号汇总/).length > 0);
     await act(async () => { slot.getByRole("button", { name: "账号" }).click(); });
     assert.ok(slot.getByRole("region", { name: "未报周额度 A 的额度" }));
     slot.lifecycle.unmount();
@@ -430,7 +430,7 @@ test("池视图把同供应商账号额度聚合成一池并记住选择", async
   // (3×20 + 1×60) / 4 = 30，剩余模式显示 70%；覆盖 2/2。
   const meter = slot.getByRole("progressbar", { name: "7d 剩余额度" });
   assert.equal(meter.getAttribute("aria-valuenow"), "70");
-  assert.ok(slot.getByText(/覆盖 2\/2/));
+  assert.ok(slot.getByText(/2 个账号汇总/));
   assert.equal(slot.queryByRole("region", { name: "Claude 工作账号 的额度" }), null);
   slot.lifecycle.unmount();
 
@@ -519,7 +519,7 @@ test("统一页面同时显示两种来源，共用池与账号切换，刷新 A
   await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
   assert.equal(poolSection().getAllByRole("progressbar")[0]!.getAttribute("aria-valuenow"), "60");
   assert.equal(clipSection().getByRole("progressbar").getAttribute("aria-valuenow"), "80");
-  assert.ok(poolSection().getByText(/覆盖 2\/2/));
+  assert.ok(poolSection().getByText(/2 个账号汇总/));
   assert.equal(poolSection().queryByRole("region", { name: "Pool A 的额度" }), null);
   await act(async () => { slot.getByRole("button", { name: "已用（Used）" }).click(); });
   assert.equal(poolSection().getAllByRole("progressbar")[0]!.getAttribute("aria-valuenow"), "40");
@@ -881,6 +881,7 @@ test("compact Claude card shows the measurable weighted week with an explicit pa
   const value = () => card.querySelector(".limits-compact-service-value")?.textContent;
   assert.equal(value(), "75%*");
   assert.match(card.title, /覆盖 2\/3/u);
+  assert.match(within(compact.container).getByRole("note", { name: "" }).textContent!, /总周额度按 2\/3 个账号计算；1 个账号未返回总周额度/u);
   assert.match(card.title, /1 个账号未返回总周额度/u);
   assert.match(card.title, /\*.*仅统计已返回.*不代表全池/u);
   assert.equal(card.querySelector(".limits-compact-service-metrics"), null);
@@ -892,6 +893,7 @@ test("compact Claude card shows the measurable weighted week with an explicit pa
   provider.accounts = provider.accounts.slice(0, 2);
   await act(async () => { compact.getByRole("button", { name: "刷新精简额度" }).click(); });
   assert.equal(value(), "25%");
+  assert.equal(within(compact.container).queryByText(/总周额度按/u), null);
   provider.accounts = [make("Team", 100, null)];
   await act(async () => { compact.getByRole("button", { name: "刷新精简额度" }).click(); });
   assert.equal(value(), "—");
@@ -966,7 +968,7 @@ test("池把整池节奏和最近账号余量分开显示，两种来源及百�
     const next = () => weekly.getByRole("note", { name: /^最近重置账号/u });
     assert.match(next().textContent!, /最近重置：7小时30分钟.*1 个账号.*周剩 60%.*建议先用/u);
     assert.match(next().getAttribute("title")!, /最近账号：周剩 60%/u);
-    assert.ok(weekly.getByText(/覆盖 5\/5 · 全池 2 账号已耗尽/u));
+    assert.ok(weekly.getByText(/全池 2 账号已耗尽/u));
     await act(async () => { slot.getByRole("button", { name: "已用（Used）" }).click(); });
     assert.match(next().textContent!, /周剩 60%/u);
     assert.equal(slot.queryByRole("button", { name: /恢复计划/u }), null);
@@ -1009,7 +1011,7 @@ test("临期机会在完整面板与小窗突出显示，不把临期余量当�
       assert.equal(opportunity.textContent, "临期额度可多用");
       assert.match(opportunity.title, /Example 1.*占当前池 5.7 个百分点.*整池节奏仍为正常用/u);
       const poolPace = view.getByRole("note", { name: /^周额度建议：正常用/u });
-      assert.equal(opportunity.nextElementSibling, poolPace);
+      assert.equal(opportunity.closest("details")!.nextElementSibling, poolPace.closest("details"));
       assert.match(view.getByRole("note", { name: /^最近重置账号/u }).textContent!, /周剩 34%.*建议先用/u);
       assert.equal(opportunity.closest(".limits-meter")!.getAttribute("data-pace"), "normal");
     }
@@ -1168,6 +1170,9 @@ test("Ultra and Pro stay separate in full pools, compact cards, reset batches an
   const proCard = compact.getByRole("button", { name: "Gemini · Pro" });
   assert.equal(ultraCard.querySelectorAll("strong")[0]!.textContent, "10%");
   assert.equal(proCard.querySelectorAll("strong")[0]!.textContent, "80%");
+  assert.equal(ultraCard.querySelector(".limits-compact-service-name")!.textContent, "Ultra");
+  assert.equal(proCard.querySelector(".limits-compact-service-name")!.textContent, "Pro");
+  assert.equal(ultraCard.querySelector(".limits-compact-service-subtitle")!.textContent, "Gemini");
   assert.match(ultraCard.title, /覆盖 2\/2/u); assert.match(proCard.title, /覆盖 1\/1/u);
   assert.doesNotMatch(ultraCard.title, /\*/u); assert.doesNotMatch(proCard.title, /\*/u);
   await act(async () => { proCard.click(); });
@@ -1325,7 +1330,7 @@ test("pool percentages use the whole pool, show decimal precision and count repo
   await slot.findByText("Codex");
   await act(async () => { slot.getByRole("button", { name: "池" }).click(); slot.getByRole("button", { name: "已用（Used）" }).click(); });
   assert.ok(slot.getByText("6.3%"));
-  assert.ok(slot.getByText(/3 个账号汇总 · 覆盖 3\/3/u));
+  assert.ok(slot.getByText(/3 个账号汇总/u));
   const footer = app.experimentalSidebarFooterItems[0]!;
   if (footer.kind !== "disclosure") throw new Error("Missing compact disclosure");
   const compact = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
@@ -1407,4 +1412,56 @@ test("quota monitor notifies the resource pool independent of account/pool and d
   assert.equal(warnings.length, 1); assert.equal(reads, before);
   await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
   assert.equal(warnings.length, 1);
+});
+
+test("小窗可直接切换模式与视图，保持服务选择、偏好共享且说明可点开", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const now = Date.parse("2026-10-26T00:00:00Z");
+  t.mock.timers.enable({ apis: ["Date"], now });
+  const at = (hours: number) => new Date(now + hours * 3600000).toISOString();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+  let reads = 0;
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", source: "cliproxy", displayName: "Demo", status: "connected", error: null,
+    providers: [{ id: "cliproxy-codex", displayName: "Codex", updatedAt: at(0), usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
+      { key: "one", label: "Example one", weight: 1, updatedAt: at(0), usage: { status: "ok", planLabel: "Pro", windows: [
+        { label: "Weekly limit", usedPercent: 81, resetsAt: at(1) }, { label: "5-hour limit", usedPercent: 25, resetsAt: at(2) },
+      ] } },
+    ] }] }] };
+  const rpc = { readAccountLimits: () => { reads++; return snapshot; } };
+  let dismisses = 0;
+  const compact = renderSlot(footer, { dismiss: () => { dismisses++; } }, { rpc });
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
+  t.after(() => { compact.lifecycle.unmount(); full.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const c = within(compact.container), f = within(full.container);
+  const card = await c.findByRole("button", { name: "Codex · Pro" });
+  await act(async () => { c.getByRole("button", { name: "小窗：池" }).click(); c.getByRole("button", { name: "小窗：已用" }).click(); });
+  assert.equal(card.getAttribute("aria-pressed"), "true");
+  assert.equal(card.getAttribute("data-tone"), "generous");
+  assert.equal(card.querySelector(".limits-compact-service-value")!.textContent, "81%");
+  assert.equal(f.getByRole("button", { name: "已用（Used）" }).getAttribute("aria-pressed"), "true");
+  assert.equal(f.getByRole("button", { name: "池" }).getAttribute("aria-pressed"), "true");
+  for (const root of [c, f]) {
+    const meter = root.getByRole("progressbar", { name: "7d 已用额度" }).closest(".limits-meter")!;
+    assert.equal(meter.getAttribute("data-tone"), "generous");
+  }
+  const pace = c.getByRole("note", { name: /^周额度建议：可多用/u });
+  const explanation = pace.closest("details")!;
+  assert.equal(explanation.open, false);
+  await act(async () => { explanation.querySelector("summary")!.click(); });
+  assert.equal(explanation.open, true);
+  assert.match(explanation.querySelector(".limits-explanation-copy")!.textContent!, /均匀使用基准/u);
+  const next = c.getByRole("note", { name: /^最近重置账号/u }).closest("details")!;
+  await act(async () => { next.querySelector("summary")!.click(); });
+  assert.equal(next.open, true);
+  assert.match(next.querySelector(".limits-explanation-copy")!.textContent!, /Example one：周剩 19%/u);
+  await act(async () => { c.getByRole("button", { name: "小窗：剩余" }).click(); c.getByRole("button", { name: "小窗：账号" }).click(); });
+  assert.equal(card.querySelector(".limits-compact-service-value")!.textContent, "19%");
+  assert.equal(f.getByRole("button", { name: "剩余" }).getAttribute("aria-pressed"), "true");
+  assert.ok(c.getByRole("region", { name: "Example one 的额度" }));
+  assert.equal(reads, 1);
+  assert.equal(dismisses, 0);
+  assert.equal(dom.window.localStorage.getItem("account-limits.display-mode"), "remaining");
+  assert.equal(dom.window.localStorage.getItem("account-limits.view"), "accounts");
 });
