@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Align 5h and model-weekly cap secondary rows at 11px in the full panel and 10px in the compact sidebar, with matching 1.6 line-height, numeric weight and coverage detail sizing.
+
 - Highlight near-reset quota that can be used more freely before the separate pool-wide pace badge, without changing pool ratings or routing.
 
 - Update Zod to 4.6.7 to fix oversized-collection validation memory exhaustion.

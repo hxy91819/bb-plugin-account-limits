@@ -114,18 +114,19 @@ export const panelStyles = `
 .limits-panel .limits-next-reset-state[data-state=exhausted] { color: var(--limits-danger-text); }
 .limits-panel .limits-next-reset-state[data-state=unknown] { font-weight: 400; color: var(--muted-foreground); }
 .limits-panel .limits-next-reset-priority { display: inline-block; margin-left: 7px; color: color-mix(in srgb, var(--primary) 60%, var(--foreground)); font-weight: 550; }
-.limits-panel .limits-pool-coverage { margin-top: 1px; font-size: 10px; }
+.limits-panel .limits-pool-coverage { margin-top: 1px; font-size: 11px; }
 .limits-panel .limits-budget-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 230px), 1fr)); gap: 20px 24px; min-width: 0; }
 .limits-panel .limits-other-windows { grid-column: 1 / -1; min-width: 0; }
 .limits-panel .limits-weekly { min-width: 0; }
 .limits-panel .limits-sessions { margin-top: 9px; padding-top: 7px; border-top: 1px solid var(--limits-line); }
-.limits-panel .limits-session { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; color: var(--muted-foreground); font-size: 10px; line-height: 1.7; font-variant-numeric: tabular-nums; }
+.limits-panel .limits-session { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; min-width: 0; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; font-variant-numeric: tabular-nums; }
 .limits-panel .limits-session + .limits-session { margin-top: 5px; }
 .limits-panel .limits-session-label { white-space: nowrap; }
 .limits-panel .limits-session-label::before { content: '↳'; margin-right: 5px; opacity: .6; }
-.limits-panel .limits-session-value { white-space: nowrap; }
+.limits-panel .limits-session-value { white-space: nowrap; font-weight: 550; }
+.limits-panel .limits-session-mode { font-weight: 400; }
 .limits-panel .limits-session-reset { overflow-wrap: anywhere; }
-.limits-panel .limits-session-detail { font-size: 9px; }
+.limits-panel .limits-session-detail { font-size: inherit; }
 .limits-panel .limits-session-blocked { padding: 0 4px; border-radius: 3px; color: var(--warning-text); background: color-mix(in srgb, var(--warning) 10%, var(--card)); }
 .limits-panel .limits-session[data-exhausted] .limits-session-value { color: var(--warning-text); }
 .limits-panel .limits-weekly-unknown { display: grid; grid-template-columns: 1fr auto; color: var(--muted-foreground); font-size: 11px; }
@@ -135,13 +136,13 @@ export const panelStyles = `
 .limits-panel .limits-caps { margin-top: 8px; }
 .limits-panel .limits-cap { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 10px; }
 .limits-panel .limits-cap + .limits-cap { margin-top: 8px; }
-.limits-panel .limits-cap-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; color: var(--muted-foreground); font-size: 11px; }
+.limits-panel .limits-cap-heading { display: flex; align-items: baseline; flex-wrap: wrap; gap: 2px 8px; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; }
 .limits-panel .limits-cap-label { white-space: nowrap; }
 .limits-panel .limits-cap-label::before { content: '↳'; margin-right: 5px; opacity: .6; }
 .limits-panel .limits-cap-value { font-variant-numeric: tabular-nums; white-space: nowrap; font-weight: 550; }
 .limits-panel .limits-cap-value[data-depleted] { color: var(--limits-danger-text); }
 .limits-panel .limits-cap-mode { font-weight: 400; }
-.limits-panel .limits-cap .limits-reset { margin-top: 0; }
+.limits-panel .limits-cap .limits-reset { margin-top: 0; line-height: 1.6; }
 .limits-panel .limits-footnote { display: flex; align-items: start; gap: 7px; color: var(--muted-foreground); font-size: 11px; line-height: 1.6; padding: 11px 20px; border-top: 1px solid var(--limits-line); background: var(--limits-soft); }
 .limits-panel .limits-footnote .limits-icon { width: 12px; height: 12px; margin-top: 2px; }
 .limits-panel .limits-pool { padding: 18px 0; border-bottom: 1px solid var(--limits-line); }
@@ -247,7 +248,8 @@ export const panelStyles = `
 .limits-compact .limits-meters { grid-template-columns: minmax(0, 1fr) !important; gap: 12px; }
 .limits-compact .limits-budget-grid { grid-template-columns: minmax(0, 1fr); gap: 14px; }
 .limits-compact .limits-sessions { margin-top: 7px; padding-top: 5px; }
-.limits-compact .limits-session { font-size: 9px; gap: 1px 6px; }
+.limits-compact .limits-session { font-size: 10px; gap: 1px 6px; }
+.limits-compact .limits-cap-heading { font-size: 10px; }
 .limits-compact .limits-weekly { padding: 0; border: 0; background: transparent; }
 .limits-compact .limits-meter { padding: 0; }
 .limits-compact .limits-meter-heading { margin-bottom: 6px; }

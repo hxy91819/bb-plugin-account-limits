@@ -234,7 +234,7 @@ function SessionStatus({ window, now, mode }: { window: MeterWindow; now: number
   return <li className="limits-session" data-exhausted={remaining === 0 || undefined} title={window.detail}>
     <span className="limits-session-label">5h</span>
     <span className="limits-session-value" role="progressbar" aria-label={`${label} ${mode === "used" ? "已用" : "剩余"}额度`}
-      aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}>{mode === "used" ? "已用" : "剩余"} {formatQuotaPercent(percent, window.pooled ? 1 : 0)}%</span>
+      aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent}><span className="limits-session-mode">{mode === "used" ? "已用" : "剩余"}</span> {formatQuotaPercent(percent, window.pooled ? 1 : 0)}%</span>
     {remaining === 0 && <span className="limits-session-blocked">暂受限</span>}
     <span className="limits-session-reset">{compactReset(window.resetsAt, now)}</span>
     {window.detail && <span className="limits-session-detail">{window.detail}</span>}
