@@ -1,16 +1,16 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowPeriod } from "./quota-presentation.js";
+import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowPeriod, quotaAlerts } from "./quota-presentation.js";
 import type { AccountLimitsPanelSnapshot } from "./contract.js";
 
-const snapshot = (usedPercent = 85): AccountLimitsPanelSnapshot => ({ machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
+const snapshot = (usedPercent = 85, includeFailure = false): AccountLimitsPanelSnapshot => ({ machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
   providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
     { key: "healthy", label: "Healthy", weight: 1, updatedAt: null, usage: { status: "ok", planLabel: null, windows: [{ id: "weekly", label: "Weekly limit", usedPercent, resetsAt: null }] } },
-    { key: "failed", label: "Failed", weight: 1, usage: { status: "expired" } },
+    ...(includeFailure ? [{ key: "failed", label: "Failed", weight: 1, usage: { status: "expired" as const } }] : []),
   ] }] }] });
 
 test("failure hiding filters accounts and failed machines without changing the source snapshot", () => {
-  const data = snapshot();
+  const data = snapshot(85, true);
   data.machines.push({ id: "bad", displayName: "Bad", status: "error", error: "offline", providers: [] });
   const filtered = visibleQuota(data, true)!;
   assert.equal(filtered.machines.length, 1);
@@ -296,4 +296,151 @@ test("session presentation pairs raw, pooled and model-qualified labels without 
   if (provider.accounts[0]!.usage.status !== "ok") throw new Error("Fixture");
   provider.accounts[0]!.usage.windows = [{ label: "5-hour limit · demo-model", usedPercent: 80, resetsAt: null }];
   assert.equal(compactPoolSummaries(provider, Date.now())[0]!.usedPercent, null);
+});
+
+const poolAlertSnapshot = (used: number[], options: { weights?: number[]; plans?: string[]; resets?: Array<string | null> } = {}) => {
+  const data = snapshot();
+  data.machines[0]!.providers[0]!.accounts = used.map((usedPercent, i) => ({ key: `account-${i}`, label: `Private account ${i}`, weight: options.weights?.[i] ?? 1,
+    usage: { status: "ok", planLabel: options.plans?.[i] ?? null, windows: [{ id: "weekly", label: "Weekly limit", usedPercent, resetsAt: options.resets?.[i] ?? null }] } }));
+  return data;
+};
+
+test("pool reminders use capacity weights and emit once per pool threshold, never per account", () => {
+  const track = createQuotaAlertTracker();
+  assert.equal(track(poolAlertSnapshot([0, 0, 0])).length, 0);
+  assert.equal(track(poolAlertSnapshot([100, 0, 0])).length, 0, "One exhausted account does not make the pool low");
+  const crossed = track(poolAlertSnapshot([100, 100, 40]));
+  assert.equal(crossed.length, 1); assert.equal(crossed[0]!.level, 1);
+  assert.match(crossed[0]!.title, /资源池.*已用 80%.*3 个账号汇总/u);
+  assert.doesNotMatch(crossed[0]!.title, /Private account/u);
+  assert.equal(track(poolAlertSnapshot([100, 100, 40])).length, 0);
+  assert.equal(track(poolAlertSnapshot([100, 100, 85]))[0]!.level, 2);
+  assert.equal(track(poolAlertSnapshot([100, 100, 100])).length, 0);
+  const weighted = createQuotaAlertTracker();
+  weighted(poolAlertSnapshot([0, 0], { weights: [1, 3] }));
+  assert.equal(weighted(poolAlertSnapshot([100, 0], { weights: [1, 3] })).length, 0);
+  assert.match(weighted(poolAlertSnapshot([100, 74], { weights: [1, 3] }))[0]!.title, /80.5%/u);
+});
+
+test("pool notification identities isolate tiers, model families and sources", () => {
+  const data = poolAlertSnapshot([79, 79, 79], { plans: ["Google AI Ultra", "Google AI Ultra", "Google AI Pro"] });
+  const provider = data.machines[0]!.providers[0]!;
+  provider.id = "cliproxy-antigravity"; provider.displayName = "Gemini";
+  for (const account of provider.accounts) if (account.usage.status === "ok") account.usage.windows = [
+    { label: "Gemini Models: Weekly limit", usedPercent: 79, resetsAt: null },
+    { label: "Claude and GPT models: Weekly limit", usedPercent: 79, resetsAt: null },
+  ];
+  const track = createQuotaAlertTracker(); track(data);
+  const first = provider.accounts[0]!.usage, second = provider.accounts[1]!.usage, pro = provider.accounts[2]!.usage;
+  if (first.status !== "ok" || second.status !== "ok" || pro.status !== "ok") throw new Error("Fixture");
+  first.windows[0]!.usedPercent = 81; second.windows[0]!.usedPercent = 81;
+  pro.windows[1]!.usedPercent = 96;
+  const alerts = track(data);
+  assert.equal(alerts.length, 2);
+  assert.ok(alerts.some(a => /Google AI Ultra.*Gem.*81%/u.test(a.title)));
+  assert.ok(alerts.some(a => /Google AI Pro.*C\/G.*96%/u.test(a.title)));
+  const other = structuredClone(data.machines[0]!); other.source = "cliproxy"; other.id = "other";
+  data.machines.push(other); track(data); // A newly seen resource pool seeds quietly.
+  other.providers[0]!.accounts.forEach(a => { if (a.usage.status === "ok") a.usage.windows.forEach(w => { w.usedPercent = 100; }); });
+  const independent = track(data);
+  assert.equal(independent.length, 3);
+  assert.ok(independent.every(a => JSON.parse(a.key).includes("other")));
+});
+
+test("staggered account resets do not re-notify an unchanged pool level; shared resets can re-arm", () => {
+  const now = Date.now();
+  const at = (h: number) => new Date(now + h * 3_600_000).toISOString();
+  const options = { resets: [at(1), at(3), at(6)] };
+  const track = createQuotaAlertTracker(); track(poolAlertSnapshot([79, 79, 79], options));
+  assert.equal(track(poolAlertSnapshot([85, 85, 85], options)).length, 1);
+  assert.equal(track(poolAlertSnapshot([85, 85, 85], { resets: [at(7), options.resets[1]!, options.resets[2]!] })).length, 0);
+  assert.equal(track(poolAlertSnapshot([20, 20, 20], options)).length, 0);
+  assert.equal(track(poolAlertSnapshot([85, 85, 85], options)).length, 1);
+  const shared = createQuotaAlertTracker();
+  shared(poolAlertSnapshot([79, 79], { resets: [at(1), at(1)] }));
+  assert.equal(shared(poolAlertSnapshot([85, 85], { resets: [at(1), at(1)] })).length, 1);
+  assert.equal(shared(poolAlertSnapshot([85, 85], { resets: [at(5), at(5)] })).length, 1);
+});
+
+test("incomplete or overdue pool windows never fall back to individual account notifications", () => {
+  const failed = poolAlertSnapshot([100, 0]); failed.machines[0]!.providers[0]!.accounts[1]!.usage = { status: "expired" };
+  assert.equal(quotaAlerts(failed).length, 0);
+  const missing = poolAlertSnapshot([100, 0]);
+  const usage = missing.machines[0]!.providers[0]!.accounts[1]!.usage;
+  if (usage.status === "ok") usage.windows = [];
+  assert.equal(quotaAlerts(missing).length, 0);
+  const overdue = poolAlertSnapshot([100, 100], { resets: ["2000-01-01T00:00:00Z", null] });
+  assert.equal(quotaAlerts(overdue).length, 0);
+});
+
+test("legacy flattened records aggregate by their account labels for reminders", () => {
+  const data = poolAlertSnapshot([0]); const provider = data.machines[0]!.providers[0]!;
+  provider.accounts = [];
+  const flattened = (values: number[]) => ({ status: "ok" as const, planLabel: null, windows: values.map((usedPercent, i) => ({
+    accountLabel: `Legacy ${i}`, label: `Legacy ${i} · Weekly limit`, usedPercent, resetsAt: null,
+  })) });
+  provider.usage = flattened([0, 0, 0]);
+  const track = createQuotaAlertTracker(); track(data);
+  provider.usage = flattened([100, 0, 0]); assert.equal(track(data).length, 0);
+  provider.usage = flattened([100, 100, 40]);
+  const alerts = track(data); assert.equal(alerts.length, 1); assert.match(alerts[0]!.title, /80%.*3 个账号汇总/u);
+});
+
+test("pool history migrates quietly from account alerts and deduplicates across pages", () => {
+  const values = new Map<string, string>([["account-limits.alert-history.v1", JSON.stringify([
+    [JSON.stringify(["bb-providers", "local", "codex", "account-0", "weekly"]), { level: 2, resetsAt: null }],
+  ])]]);
+  const storage = { getItem: (key: string) => values.get(key) ?? null, setItem: (key: string, value: string) => { values.set(key, value); } };
+  const page = createQuotaAlertTracker(storage);
+  assert.equal(page(poolAlertSnapshot([79, 79])).length, 0);
+  assert.equal(page(poolAlertSnapshot([85, 85])).length, 1);
+  const secondPage = createQuotaAlertTracker(storage);
+  assert.equal(secondPage(poolAlertSnapshot([85, 85])).length, 0);
+  assert.equal(page(poolAlertSnapshot([96, 96])).length, 1);
+  assert.equal(secondPage(poolAlertSnapshot([96, 96])).length, 0);
+});
+
+test("Claude total-week and missing-week model-cap pools keep separate reminder denominators", () => {
+  const data = poolAlertSnapshot([79, 79]); const provider = data.machines[0]!.providers[0]!;
+  provider.id = "cliproxy-claude"; provider.displayName = "Claude";
+  const cap = { label: "Weekly scoped limit", usedPercent: 79, resetsAt: null };
+  const missing = { key: "team", label: "Team account", weight: 100, usage: { status: "ok" as const, planLabel: null, windows: [cap] } };
+  provider.accounts.push(missing);
+  const track = createQuotaAlertTracker(); track(data);
+  for (const account of provider.accounts.slice(0, 2)) if (account.usage.status === "ok") account.usage.windows[0]!.usedPercent = 85;
+  cap.usedPercent = 96;
+  const alerts = track(data);
+  assert.equal(alerts.length, 2);
+  assert.ok(alerts.some(a => /含全模型周额度.*周额度 已用 85%.*2 个账号汇总/u.test(a.title)));
+  assert.ok(alerts.some(a => /未报告全模型周额度.*Fable 周上限 已用 96%.*1 个账号汇总/u.test(a.title)));
+});
+
+test("a typed account losing quota cannot shrink its old pool into an individual alert", () => {
+  const valid = poolAlertSnapshot([100, 0], { plans: ["Pro", "Pro"] });
+  const track = createQuotaAlertTracker(); track(valid);
+  const failed = structuredClone(valid);
+  failed.machines[0]!.providers[0]!.accounts[1]!.usage = { status: "error", message: "Quota read failed" };
+  assert.equal(track(failed).length, 0);
+  assert.equal(quotaAlerts(failed).length, 0);
+  assert.equal(track(valid).length, 0);
+  assert.equal(track(failed).length, 0);
+  const recovered = poolAlertSnapshot([100, 70], { plans: ["Pro", "Pro"] });
+  assert.equal(track(recovered).length, 1, "Failure must not overwrite the previous complete pool level");
+});
+
+test("empty Claude observations block their tier across weekly-availability subpools", () => {
+  const valid = poolAlertSnapshot([100, 0, 79], { plans: ["Pro", "Pro", "Ultra"] });
+  const provider = valid.machines[0]!.providers[0]!; provider.id = "cliproxy-claude";
+  for (const account of provider.accounts) if (account.usage.status === "ok") account.usage.windows[0]!.label = "Weekly scoped limit";
+  const track = createQuotaAlertTracker(); track(valid);
+  const empty = structuredClone(valid); const accounts = empty.machines[0]!.providers[0]!.accounts;
+  if (accounts[1]!.usage.status !== "ok" || accounts[2]!.usage.status !== "ok") throw new Error("Fixture");
+  accounts[1]!.usage.windows = [];
+  accounts[2]!.usage.windows[0]!.usedPercent = 85;
+  const alerts = track(empty);
+  assert.equal(alerts.length, 1); assert.match(alerts[0]!.title, /Ultra/u); assert.doesNotMatch(alerts[0]!.title, /Pro/u);
+  assert.equal(track(valid).length, 0);
+  const recovered = structuredClone(valid); const low = recovered.machines[0]!.providers[0]!.accounts[1]!.usage;
+  if (low.status !== "ok") throw new Error("Fixture"); low.windows[0]!.usedPercent = 70;
+  assert.equal(track(recovered).length, 1, "Recovering a complete Pro cohort retains its earlier threshold history");
 });

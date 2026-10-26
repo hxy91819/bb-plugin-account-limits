@@ -454,7 +454,7 @@ function AccountLimitsPanel({ store }: { store: QuotaUiStore }) {
         </div>
       </div>
       <div className="limits-preferences"><label className="limits-preference"><input type="checkbox" checked={hideFailures} onChange={event => setHideFailures(event.target.checked)} />隐藏获取失败</label>
-      <label className="limits-preference"><input type="checkbox" checked={reminders} onChange={event => setReminders(event.target.checked)} />额度提醒（已用 80% / 95%）</label></div>
+      <label className="limits-preference"><input type="checkbox" checked={reminders} onChange={event => setReminders(event.target.checked)} />资源池提醒（已用 80% / 95%）</label></div>
       {view === "pool" && providers.length > 0 && <p className="limits-recovery-legend"><span className="limits-recovery-key" aria-hidden="true" />{mode === "used"
         ? "已用部分按预计恢复批次分段，深色较近、浅色较远；斜纹为时间未知或待刷新。"
         : "实色为当前剩余，浅色分段为预计恢复（由近到远）；斜纹为时间未知或待刷新。"}</p>}
@@ -552,8 +552,8 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
         <summary aria-label="额度显示设置" title="显示设置"><PanelIcon name="settings" /></summary>
         <div className="limits-compact-options">
           <label><input type="checkbox" checked={hideFailures} onChange={event => setHideFailures(event.target.checked)} />隐藏失败</label>
-          <label><input type="checkbox" checked={reminders} onChange={event => setReminders(event.target.checked)} />额度提醒</label>
-          <span>已用 80% / 95% 时提醒</span>
+          <label><input type="checkbox" checked={reminders} onChange={event => setReminders(event.target.checked)} />资源池提醒</label>
+          <span>按池汇总，已用 80% / 95% 时提醒</span>
         </div>
       </details>
       <button type="button" className="limits-compact-action" aria-label="完整页面" title="打开完整页面" onClick={() => { navigate.toPluginPanel("account-limits"); dismiss(); }}><PanelIcon name="open" /></button>

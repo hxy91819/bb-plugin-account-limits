@@ -1319,3 +1319,38 @@ test("native Codex model sessions stay attached to their own weekly quota", asyn
   assert.equal(b.getByRole("progressbar").getAttribute("aria-valuenow"), "70");
   assert.equal(slot.container.querySelectorAll(".limits-meter-track").length, 1);
 });
+
+test("quota monitor notifies the resource pool independent of account/pool and display mode", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-26T00:00:00Z") });
+  const { toast } = await import("sonner"); const warnings: string[] = [];
+  t.mock.method(toast, "warning", (message: unknown) => { warnings.push(String(message)); return 1; });
+  const app = await loadPluginApp(() => import("./app.js"));
+  let percentages = [0, 0, 0]; let reads = 0;
+  const rpc = { readAccountLimits: () => {
+    reads++;
+    return { machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
+      providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] },
+        accounts: percentages.map((usedPercent, index) => ({ key: String(index), label: `Account ${index}`, weight: 1,
+          usage: { status: "ok", planLabel: "Pro", windows: [{ id: "weekly", label: "Weekly limit", usedPercent, resetsAt: null }] } })),
+      }],
+    }] };
+  } };
+  const monitor = renderSlot(app.appOverlays[0]!, {}, { rpc });
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
+  t.after(() => { monitor.lifecycle.unmount(); full.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await full.findByText("Codex");
+  percentages = [100, 0, 0];
+  await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
+  assert.equal(warnings.length, 0);
+  percentages = [100, 100, 40];
+  await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
+  assert.equal(warnings.length, 1);
+  assert.match(warnings[0]!, /资源池.*已用 80%.*3 个账号汇总/u);
+  assert.doesNotMatch(warnings[0]!, /Account [0-9]/u);
+  const before = reads;
+  await act(async () => { full.getByRole("button", { name: "池" }).click(); full.getByRole("button", { name: "已用（Used）" }).click(); });
+  assert.equal(warnings.length, 1); assert.equal(reads, before);
+  await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
+  assert.equal(warnings.length, 1);
+});

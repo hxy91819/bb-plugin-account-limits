@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Notify on resource-pool weighted thresholds instead of individual accounts; isolate tiers/windows, preserve quiet startup and persistent deduplication, and avoid repeated alerts from staggered resets.
+
 - Lead with weekly quota in all views and sources; show matching 5h limits as secondary status, retain exhausted-session warnings and keep missing weeks unknown.
 - Show pooled percentages to one decimal and name the reporting-account count; full-pool capacity remains 100%, including compact cards.
 

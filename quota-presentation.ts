@@ -80,22 +80,63 @@ export function createQuotaUiStore() {
 }
 export type QuotaUiStore = ReturnType<typeof createQuotaUiStore>;
 
+/** Account records and legacy flattened observations share the same pool inputs. */
+function providerAccounts(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number]): readonly QuotaAccount[] {
+  if (provider.accounts.length) return provider.accounts;
+  const legacy = new Map<string, QuotaAccount>();
+  if (provider.usage.status === "ok") {
+    for (const window of provider.usage.windows) {
+      const key = window.accountLabel ?? "provider";
+      let account = legacy.get(key);
+      if (!account) {
+        account = { key, label: key, weight: 1, usage: { status: "ok", planLabel: provider.usage.planLabel, windows: [] } };
+        legacy.set(key, account);
+      }
+      const prefix = window.accountLabel ? `${window.accountLabel} · ` : "";
+      if (account.usage.status === "ok") account.usage.windows.push({ ...window,
+        label: prefix && window.label.startsWith(prefix) ? window.label.slice(prefix.length) : window.label });
+    }
+  }
+  return [...legacy.values()];
+}
+
 export interface QuotaAlert { key: string; level: number; title: string; resetsAt: number | null; }
 export function quotaAlerts(snapshot: AccountLimitsPanelSnapshot): QuotaAlert[] {
+  const now = Date.now();
   return preferCodexPool(snapshot).machines.flatMap(machine => machine.status !== "connected" || machine.error ? [] : machine.providers.flatMap(provider => {
-    const accounts = provider.accounts.length ? provider.accounts : [{ key: "provider", label: provider.displayName, usage: provider.usage }];
-    return accounts.flatMap(account => {
-      if (account.usage.status !== "ok") return [];
-      const seen = new Set<string>();
-      return account.usage.windows.flatMap(window => {
-        const key = JSON.stringify([machine.source ?? "cliproxy", machine.id, provider.id, account.key, ("id" in window ? window.id : null) ?? window.label]);
-        if (seen.has(key)) return [];
-        seen.add(key);
+    const accounts = providerAccounts(provider);
+    // Failed reads lose their tier in the normalized DTO. They may belong to any
+    // current cohort, so do not let regrouping manufacture a smaller full pool.
+    if (accounts.some(account => account.usage.status !== "ok")) return [];
+    const groups = groupAccountPools(provider.id, accounts);
+    const emptyTypes = new Set(groups.filter(group => group.accounts.some(account =>
+      account.usage.status === "ok" && account.usage.windows.length === 0)).map(group => group.typeId));
+    if (emptyTypes.has("default")) return [];
+    return groups.flatMap(group => {
+      // An empty observation could have belonged to either Claude availability
+      // subgroup; retain the type boundary when suppressing incomplete data.
+      if (emptyTypes.has(group.typeId)) return [];
+      const pool = aggregateCliproxyPool(group.accounts);
+      if (pool.status !== "ok") return [];
+      return pool.windows.flatMap(window => {
+        // A partial/overdue observation cannot stand in for the complete pool.
+        if (window.accounts !== pool.totalAccounts) return [];
         const reset = window.resetsAt ? Date.parse(window.resetsAt) : NaN;
-        if (Number.isFinite(reset) && reset <= Date.now()) return [];
+        if (Number.isFinite(reset) && reset <= now) return [];
+        const resets = group.accounts.map(account => {
+          const raw = account.usage.status === "ok" ? account.usage.windows.find(candidate =>
+            (candidate.id ?? normalizeCliproxyWindow(candidate.label).id) === window.id) : undefined;
+          return raw?.resetsAt ? Date.parse(raw.resetsAt) : NaN;
+        });
+        // Only a synchronized whole-pool reset forms a single known cycle.
+        // Moving the earliest reset in a staggered pool must not re-notify it.
+        const sharedReset = resets.every(Number.isFinite) && new Set(resets).size === 1 ? resets[0]! : null;
+        const key = JSON.stringify([machine.source ?? "cliproxy", machine.id, provider.id, "pool", group.id, window.id]);
         const level = window.usedPercent >= 95 ? 2 : window.usedPercent >= 80 ? 1 : 0;
-        return [{ key, level, resetsAt: Number.isFinite(reset) ? reset : null,
-          title: `${provider.displayName}${account.label === provider.displayName ? "" : ` · ${account.label}`} · ${quotaWindowDisplayLabel(provider.id, window.label) ?? window.label} 已用 ${Math.round(window.usedPercent)}%${level === 2 ? "，额度紧张" : "，请留意余量"}` }];
+        const label = quotaWindowDisplayLabel(provider.id, window.label)
+          ?? (window.label === "scoped" ? "Fable 周上限" : window.label === "Opus 7d" ? "Opus 周上限" : window.label.replace(/\b7d$/u, "周额度"));
+        return [{ key, level, resetsAt: sharedReset,
+          title: `${provider.displayName} · ${machine.displayName}${group.label ? ` · ${group.label}` : ""} 资源池 · ${label} 已用 ${formatQuotaPercent(window.usedPercent, 1)}%${level === 2 ? "，额度紧张" : "，请留意余量"}（${window.accounts} 个账号汇总）` }];
       });
     });
   }));
@@ -178,21 +219,7 @@ export interface CompactPoolSummary {
 
 /** Service cards always describe a pool, independent of the expanded account view. */
 export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number], now: number): CompactPoolSummary[] {
-  const legacy = new Map<string, QuotaAccount>();
-  if (!provider.accounts.length && provider.usage.status === "ok") {
-    for (const window of provider.usage.windows) {
-      const key = window.accountLabel ?? "provider";
-      let account = legacy.get(key);
-      if (!account) {
-        account = { key, label: key, weight: 1, usage: { status: "ok", planLabel: provider.usage.planLabel, windows: [] } };
-        legacy.set(key, account);
-      }
-      const prefix = window.accountLabel ? `${window.accountLabel} · ` : "";
-      if (account.usage.status === "ok") account.usage.windows.push({ ...window,
-        label: prefix && window.label.startsWith(prefix) ? window.label.slice(prefix.length) : window.label });
-    }
-  }
-  const accounts = provider.accounts.length ? provider.accounts : [...legacy.values()];
+  const accounts = providerAccounts(provider);
   const groups = groupAccountPools(provider.id, accounts);
   return groups.flatMap<CompactPoolSummary>(group => {
     const compatibleGroups = groups.filter(other => other.typeId === group.typeId);
