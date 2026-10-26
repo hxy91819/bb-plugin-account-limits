@@ -1,6 +1,8 @@
+import { providerBrandAssets } from "./provider-brand-assets.js";
+
 // Grok paths: get-bb/bb, plugins/provider-acp/icons/grok.svg.
-// Antigravity path: hxy91819/bb-plugin-acp-profile-icons, ANTIGRAVITY_MARK.
-// Both sources are MIT licensed; retain their notices below.
+// The Grok source is MIT licensed; retain its notice below.
+// Other marks come from official sites; see icons/providers/sources.json.
 /*!
 MIT License
 
@@ -36,7 +38,22 @@ export function GrokIcon({ className }: IconProps) {
 }
 
 export function AntigravityIcon({ className }: IconProps) {
-  return <svg className={className} viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
-    <path d="M21.751 22.607c1.34 1.005 3.35.335 1.508-1.508C17.73 15.74 18.904 1 12.037 1 5.17 1 6.342 15.74.815 21.1c-2.01 2.009.167 2.511 1.507 1.506 5.192-3.517 4.857-9.714 9.715-9.714 4.857 0 4.522 6.197 9.714 9.715z" transform="translate(1.2 1.2) scale(0.9)" />
-  </svg>;
+  return <img className={className} src={providerBrandAssets.antigravity} alt="" aria-hidden="true" draggable={false} data-provider-brand="antigravity" />;
+}
+
+/** Service identity only; model-family and quota grouping remain independent. */
+export function providerBrand(id: string): keyof typeof providerBrandAssets | "grok" | null {
+  const key = id.toLowerCase();
+  if (key.includes("antigravity")) return "antigravity";
+  if (key.includes("claude")) return "claude";
+  if (key.includes("codex") || key === "openai") return "openai";
+  if (key.includes("cursor")) return "cursor";
+  if (key.includes("gemini")) return "gemini";
+  if (key.includes("xai") || key.includes("grok")) return "grok";
+  return null;
+}
+
+export function ProviderBrandIcon({ brand, className }: IconProps & { brand: NonNullable<ReturnType<typeof providerBrand>> }) {
+  if (brand === "grok") return <GrokIcon className={className} />;
+  return <img className={className} src={providerBrandAssets[brand]} alt="" aria-hidden="true" draggable={false} data-provider-brand={brand} />;
 }

@@ -116,6 +116,7 @@
     "package-lock.json",
     "config.example.json",
     "docs/",
-    "scripts/package.mjs"
+    "scripts/package.mjs",
+    "provider-brand-assets.ts"
   ]
 }

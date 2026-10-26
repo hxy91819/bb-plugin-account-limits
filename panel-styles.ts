@@ -54,8 +54,6 @@ export const panelStyles = `
 .limits-panel .limits-provider { border: 1px solid var(--limits-line); border-radius: 16px; overflow: hidden; background: var(--card); box-shadow: 0 3px 12px color-mix(in srgb, var(--foreground) 2%, transparent); margin-bottom: 16px; }
 .limits-panel .limits-provider-head { display: flex; align-items: center; gap: 12px; padding: 17px 20px; border-bottom: 1px solid var(--limits-line); background: linear-gradient(110deg, color-mix(in srgb, var(--primary) 3%, var(--card)), var(--card) 65%); }
 .limits-panel .limits-provider-mark { display: grid; place-items: center; flex-shrink: 0; width: 34px; height: 34px; color: var(--primary); background: color-mix(in srgb, var(--primary) 8%, var(--card)); border: 1px solid color-mix(in srgb, var(--primary) 10%, var(--card)); border-radius: 11px; }
-.limits-panel .limits-provider-mark--claude { color: var(--foreground); background: var(--limits-soft); border-color: var(--limits-line); }
-.limits-panel .limits-provider-mark--codex { color: var(--card); background: var(--foreground); border-color: var(--foreground); }
 .limits-panel .limits-mark-icon { width: 19px; height: 19px; }
 .limits-panel .limits-mark-letter { font-size: 20px; font-weight: 600; line-height: 1; }
 .limits-panel .limits-provider-title { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; min-width: 0; }
@@ -228,6 +226,9 @@ export const panelStyles = `
 .limits-compact .limits-pool-count { font-size: 10px; }
 .limits-compact .limits-compact-services { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 3px; padding: 3px; margin: 0 10px 12px; border-radius: 8px; background: var(--sidebar-accent, var(--muted)); }
 .limits-compact .limits-compact-service { display: grid; grid-template-rows: 30px 32px; justify-items: stretch; align-content: center; gap: 2px; min-width: 0; min-height: 82px; padding: 7px 6px; border: 1px solid transparent; border-radius: 6px; font: inherit; text-align: center; background: transparent; color: var(--muted-foreground); }
+.limits-compact .limits-compact-service-heading { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; }
+.limits-compact .limits-compact-service-heading .limits-mark-icon { display: block; width: 14px; height: 14px; flex: none; object-fit: contain; }
+.limits-compact .limits-compact-service-heading .limits-mark-letter { width: 14px; font-size: 12px; line-height: 14px; }
 .limits-compact .limits-compact-service-identity { display: flex; flex-direction: column; min-width: 0; }
 .limits-compact .limits-compact-service-subtitle { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; line-height: 15px; opacity: .8; }
 .limits-compact .limits-compact-service-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; line-height: 15px; }

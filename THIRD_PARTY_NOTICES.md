@@ -1,6 +1,14 @@
 # Third-party notices
 
-Grok icon geometry originates from get-bb/bb, Copyright (c) 2026 Michael Yong. Antigravity icon geometry originates from hxy91819/bb-plugin-acp-profile-icons, Copyright (c) 2026 hxy91819. Both are MIT licensed; their license notice is retained in provider-icons.tsx and generated bundles.
+Brand artwork in `icons/providers/` and its byte-for-byte embedded copies in
+`provider-brand-assets.ts` remain the property of Anthropic, OpenAI, Google and
+Anysphere, respectively. This artwork is not covered by the plugin's MIT
+license. It is used only to identify the corresponding services; no sponsorship
+or endorsement is implied. Primary sources, exact file hashes and source brand
+guidance are documented in `icons/providers/README.md` and `sources.json`.
+
+Grok icon geometry originates from get-bb/bb, Copyright (c) 2026 Michael Yong.
+Its MIT license notice is retained in provider-icons.tsx and generated bundles.
 
 MIT License
 

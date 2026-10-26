@@ -3,7 +3,7 @@ import { toast } from "sonner";
 import { definePluginApp, experimental_Icon as BbIcon, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
 import { aggregateCliproxyPool, groupAccountPools, groupAccountTypes, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
-import { AntigravityIcon, GrokIcon } from "./provider-icons.js";
+import { AntigravityIcon, GrokIcon, ProviderBrandIcon, providerBrand } from "./provider-icons.js";
 import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, quotaTone, formatQuotaPercent, quotaWindowDisplayLabel, quotaWindowPeriod, type QuotaUiStore } from "./quota-presentation.js";
 import { useQuotaData, useQuotaPreference, useQuotaChoicePreference } from "./quota-ui.js";
 import { panelStyles } from "./panel-styles.js";
@@ -128,9 +128,8 @@ function PanelIcon({ name, spinning = false }: { name: "refresh" | "accounts" | 
 }
 
 function ProviderMark({ id, name }: { id: string; name: string }) {
-  if (id.includes("antigravity")) return <AntigravityIcon className="limits-mark-icon" />;
-  if (id.includes("xai")) return <GrokIcon className="limits-mark-icon" />;
-  if (id.includes("claude")) return <svg className="limits-mark-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" aria-hidden="true"><path d="M12 2v20M2 12h20M5 5l14 14M5 19 19 5M3 8l18 8M8 3l8 18M3 16l18-8M8 21 16 3" /></svg>;
+  const brand = providerBrand(id);
+  if (brand) return <ProviderBrandIcon brand={brand} className="limits-mark-icon" />;
   return <span className="limits-mark-letter" aria-hidden="true">{id.includes("codex") ? "⌘" : name.slice(0, 1).toUpperCase()}</span>;
 }
 
@@ -597,7 +596,7 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
         return <button type="button" key={entry.key} className="limits-compact-service" data-tone={metrics.length === 1 ? metrics[0]!.tone : "normal"} aria-pressed={entry.key === active?.key}
           aria-label={entry.name}
           title={`${entry.machine.displayName} · ${sourceNames[entry.machine.source ?? "cliproxy"]}${summary ? ` · ${summary}（池汇总，各项分别统计） · ${detail}` : ""}`}
-          onClick={() => setSelected(entry.key)}><span className="limits-compact-service-identity"><span className="limits-compact-service-name">{entry.tier === "套餐未识别" ? "未标套餐" : entry.tier ?? entry.service}</span><span className="limits-compact-service-subtitle">{entry.tier ? entry.service : "额度"}</span></span>{metrics.length > 1 ? <span className="limits-compact-service-metrics">{metrics.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label === "C/G周" ? "C/GPT" : metric.label}</span><strong>{metric.percent === null ? "—" : `${metric.percent}%${metric.partial ? "*" : ""}`}</strong></span>)}</span> : <span className="limits-compact-service-value">{metrics[0]?.percent === undefined || metrics[0].percent === null ? "—" : `${metrics[0].percent}%${metrics[0].partial ? "*" : ""}`}</span>}</button>;
+          onClick={() => setSelected(entry.key)}><span className="limits-compact-service-identity"><span className="limits-compact-service-heading"><ProviderMark id={entry.provider.id} name={entry.provider.displayName} /><span className="limits-compact-service-name">{entry.tier === "套餐未识别" ? "未标套餐" : entry.tier ?? entry.service}</span></span><span className="limits-compact-service-subtitle">{entry.tier ? entry.service : "额度"}</span></span>{metrics.length > 1 ? <span className="limits-compact-service-metrics">{metrics.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label === "C/G周" ? "C/GPT" : metric.label}</span><strong>{metric.percent === null ? "—" : `${metric.percent}%${metric.partial ? "*" : ""}`}</strong></span>)}</span> : <span className="limits-compact-service-value">{metrics[0]?.percent === undefined || metrics[0].percent === null ? "—" : `${metrics[0].percent}%${metrics[0].partial ? "*" : ""}`}</span>}</button>;
       })}
     </div>}
     <div className="limits-compact-body">

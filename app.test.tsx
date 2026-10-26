@@ -1170,6 +1170,13 @@ test("Ultra and Pro stay separate in full pools, compact cards, reset batches an
   const proCard = compact.getByRole("button", { name: "Gemini · Pro" });
   assert.equal(ultraCard.querySelectorAll("strong")[0]!.textContent, "10%");
   assert.equal(proCard.querySelectorAll("strong")[0]!.textContent, "80%");
+  for (const card of [ultraCard, proCard]) {
+    const logo = card.querySelector('img[data-provider-brand="antigravity"]')!;
+    assert.ok(logo, "Known services show their bundled logo beside the tier");
+    assert.equal(logo.getAttribute("alt"), "");
+    assert.equal(logo.getAttribute("draggable"), "false");
+    assert.match(logo.getAttribute("src")!, /^data:image\/svg\+xml;base64,/u);
+  }
   assert.equal(ultraCard.querySelector(".limits-compact-service-name")!.textContent, "Ultra");
   assert.equal(proCard.querySelector(".limits-compact-service-name")!.textContent, "Pro");
   assert.equal(ultraCard.querySelector(".limits-compact-service-subtitle")!.textContent, "Gemini");

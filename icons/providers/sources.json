@@ -1,0 +1,61 @@
+{
+  "assets": [
+    {
+      "id": "claude",
+      "name": "Claude",
+      "file": "claude.png",
+      "sourcePage": "https://claude.com/",
+      "assetUrl": "https://claude.com/icon.png",
+      "sha256": "ce7e8cafe276c4d6820387652d77437772fb2efa7511bff92a4e7664cd2bee51",
+      "bytes": 1588,
+      "retrievedAt": "2026-10-26",
+      "rights": "Brand owner retains all rights; not covered by this plugin's MIT license."
+    },
+    {
+      "id": "openai",
+      "name": "OpenAI (Codex)",
+      "file": "openai.png",
+      "sourcePage": "https://developers.openai.com/codex/",
+      "assetUrl": "https://developers.openai.com/favicon.png",
+      "sha256": "8d5575ee667ff715cd3e3074d5296edc68d5aadd89720d203e13131b68b22a04",
+      "bytes": 1841,
+      "retrievedAt": "2026-10-26",
+      "rights": "Brand owner retains all rights; not covered by this plugin's MIT license."
+    },
+    {
+      "id": "antigravity",
+      "name": "Google Antigravity",
+      "file": "antigravity.svg",
+      "sourcePage": "https://antigravity.google/press",
+      "assetUrl": "https://antigravity.google/assets/image/brand/antigravity-icon__full-color.svg",
+      "sha256": "d775965ea1f8060538c15f758a3e22487317211fcb6051333b5e023f35aa726f",
+      "bytes": 5301,
+      "retrievedAt": "2026-10-26",
+      "rights": "Brand owner retains all rights; not covered by this plugin's MIT license."
+    },
+    {
+      "id": "gemini",
+      "name": "Google Gemini",
+      "file": "gemini.png",
+      "sourcePage": "https://gemini.google/overview/",
+      "assetUrl": "https://gemini.google/images/spark_4c.png",
+      "sha256": "f39c8b1c0dbdf1411a52b203cd7d2815ef1dc5f899f457499e7d5aa57f25b6c8",
+      "bytes": 9531,
+      "retrievedAt": "2026-10-26",
+      "rights": "Brand owner retains all rights; not covered by this plugin's MIT license."
+    },
+    {
+      "id": "cursor",
+      "name": "Cursor",
+      "file": "cursor.png",
+      "sourcePage": "https://cursor.com/brand",
+      "assetUrl": "https://ptht05hbb1ssoooe.public.blob.vercel-storage.com/assets/brand/cursor-brand-assets.zip",
+      "sha256": "ff6890b460641ae05d8e58691c3b4e4438ef7da473df6c34ab3f50334be8c9b3",
+      "bytes": 22572,
+      "retrievedAt": "2026-10-26",
+      "rights": "Brand owner retains all rights; not covered by this plugin's MIT license.",
+      "archiveEntry": "App Icons/PNG/APP_ICON_2D_DARK.png",
+      "archiveSha256": "97488a7751914e60f9ff532bc33810cdeaebdddc017548abe6ca2bc29bbc3928"
+    }
+  ]
+}

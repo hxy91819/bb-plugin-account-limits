@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Add locally bundled official provider artwork to compact cards and service headers, with original colors, portable source files and attribution; keep unknown-service fallbacks.
+
 - Put subscription tiers first in readable, wrapping compact cards; keep model labels on one line and expose used/remaining and account/pool controls directly.
 - Explain partial quota coverage in selected-card details, show full cohort counts once, and retain explicit coverage only for incomplete windows.
 - Unify card/meter color priority, secondary quota rows and touch-friendly inline explanations; enlarge mobile action targets without additional quota requests.
