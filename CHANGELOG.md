@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Update Zod to 4.6.7 to fix oversized-collection validation memory exhaustion.
+
 - Notify on resource-pool weighted thresholds instead of individual accounts; isolate tiers/windows, preserve quiet startup and persistent deduplication, and avoid repeated alerts from staggered resets.
 
 - Lead with weekly quota in all views and sources; show matching 5h limits as secondary status, retain exhausted-session warnings and keep missing weeks unknown.
