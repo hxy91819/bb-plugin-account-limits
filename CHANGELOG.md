@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Highlight near-reset quota that can be used more freely before the separate pool-wide pace badge, without changing pool ratings or routing.
+
 - Update Zod to 4.6.7 to fix oversized-collection validation memory exhaustion.
 
 - Notify on resource-pool weighted thresholds instead of individual accounts; isolate tiers/windows, preserve quiet startup and persistent deduplication, and avoid repeated alerts from staggered resets.

@@ -960,6 +960,9 @@ test("池把整池节奏和最近账号余量分开显示，两种来源及百�
     const weekly = within(slot.getByRole("group", { name: "周额度" }));
     const advice = weekly.getByRole("note", { name: /^周额度建议：节约用/u });
     assert.match(advice.textContent!, /整池节奏.*节约用/u);
+    const opportunity = weekly.getByRole("note", { name: /^临期使用建议：/u });
+    assert.equal(opportunity.textContent, "临期额度可多用");
+    assert.match(opportunity.title, /最近账号.*占当前池 12 个百分点.*整池节奏仍为节约用/u);
     const next = () => weekly.getByRole("note", { name: /^最近重置账号/u });
     assert.match(next().textContent!, /最近重置：7小时30分钟.*1 个账号.*周剩 60%.*建议先用/u);
     assert.match(next().getAttribute("title")!, /最近账号：周剩 60%/u);
@@ -970,10 +973,57 @@ test("池把整池节奏和最近账号余量分开显示，两种来源及百�
     assert.equal(slot.queryByRole("dialog", { hidden: true }), null);
     await act(async () => { slot.getByRole("button", { name: "账号" }).click(); });
     assert.equal(slot.queryByText("整池节奏"), null);
+    assert.equal(slot.queryByRole("note", { name: /^临期使用建议：/u }), null);
     assert.equal(slot.queryByRole("note", { name: /^最近重置账号/u }), null);
     assert.equal(slot.inspection.rpcCalls.length, 1);
     slot.lifecycle.unmount();
   }
+});
+
+test("临期机会在完整面板与小窗突出显示，不把临期余量当作整池宽裕", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.view", "pool");
+  const now = Date.parse("2026-10-26T00:00:00Z");
+  t.mock.timers.enable({ apis: ["Date", "setInterval"], now });
+  const at = (hours: number) => new Date(now + hours * 3_600_000).toISOString();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+  const accounts = [34, 43, 43, 43, 43, 45].map((remaining, index) => ({ key: `example-${index}`, label: `Example ${index + 1}`, weight: 1,
+    updatedAt: at(0), usage: { status: "ok" as const, planLabel: null, windows: [
+      { label: "Weekly limit", usedPercent: 100 - remaining, resetsAt: at(index === 0 ? 1 : 84) },
+      { label: "5-hour limit", usedPercent: 0, resetsAt: at(2) },
+    ] } }));
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", source: "cliproxy", displayName: "proxy", status: "connected", error: null,
+    providers: [{ id: "cliproxy-claude", displayName: "Claude", updatedAt: at(0), usage: { status: "ok", planLabel: null, windows: [] }, accounts }] }] };
+  const rpc = { readAccountLimits: () => snapshot };
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
+  const compact = renderSlot(footer, { dismiss() {} }, { rpc });
+  t.after(() => { full.lifecycle.unmount(); compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await within(full.container).findByText("Claude");
+  await within(compact.container).findByRole("button", { name: "Claude" });
+  const check = () => {
+    for (const slot of [full, compact]) {
+      const view = within(slot.container);
+      const opportunity = view.getByRole("note", { name: /^临期使用建议：/u });
+      assert.equal(opportunity.textContent, "临期额度可多用");
+      assert.match(opportunity.title, /Example 1.*占当前池 5.7 个百分点.*整池节奏仍为正常用/u);
+      const poolPace = view.getByRole("note", { name: /^周额度建议：正常用/u });
+      assert.equal(opportunity.nextElementSibling, poolPace);
+      assert.match(view.getByRole("note", { name: /^最近重置账号/u }).textContent!, /周剩 34%.*建议先用/u);
+      assert.equal(opportunity.closest(".limits-meter")!.getAttribute("data-pace"), "normal");
+    }
+  };
+  check();
+  await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
+  check();
+  assert.equal(full.inspection.rpcCalls.length + compact.inspection.rpcCalls.length, 1);
+  await act(async () => { t.mock.timers.tick(61 * 60_000); });
+  for (const slot of [full, compact]) {
+    assert.equal(within(slot.container).queryByRole("note", { name: /^临期使用建议：/u }), null);
+    assert.match(within(slot.container).getByRole("note", { name: /^最近重置账号/u }).textContent!, /待确认/u);
+  }
+  assert.equal(full.inspection.rpcCalls.length + compact.inspection.rpcCalls.length, 1);
 });
 
 test("最近重置摘要显示同批账号状态，越过重置时等待确认并保留缓存值", async t => {
@@ -1001,6 +1051,9 @@ test("最近重置摘要显示同批账号状态，越过重置时等待确认�
   assert.match(next().getAttribute("title")!, /有余量但受限：周剩 42%，5h 暂受限/u);
   assert.match(next().getAttribute("title")!, /少量：周剩 <0.1%/u);
   assert.equal(slot.queryByText("建议先用"), null);
+  const opportunity = slot.getByRole("note", { name: /^临期使用建议：/u });
+  assert.match(opportunity.title, /晚重置/u);
+  assert.doesNotMatch(opportunity.title, /有余量但受限|零余量|少量/u);
   const bar = slot.getByRole("progressbar", { name: "7d 剩余额度" });
   const observed = bar.getAttribute("aria-valuenow");
   await act(async () => { t.mock.timers.tick(31 * 60_000); });
@@ -1029,6 +1082,7 @@ test("部分重置时间未知时只称最近已知，旧测量与全部未知�
   await slot.findByText("Codex");
   const next = () => slot.getByRole("note", { name: /^最近已知重置账号/u });
   assert.match(next().textContent!, /最近已知重置.*周剩 42%.*建议先用/u);
+  assert.equal(slot.queryByRole("note", { name: /^临期使用建议：/u }), null);
   assert.match(next().getAttribute("title")!, /另有 1 个账号的周窗口或重置时间未知/u);
   await act(async () => { t.mock.timers.tick(61 * 60_000); });
   assert.match(next().textContent!, /余量待确认/u);

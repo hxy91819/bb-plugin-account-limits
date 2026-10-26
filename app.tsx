@@ -170,6 +170,9 @@ function WindowMeter({ window, now, mode }: { window: MeterWindow; now: number; 
   const percent = mode === "used" ? 100 - remaining : remaining;
   const reset = compactReset(window.resetsAt, now);
   const depleted = remaining <= 10;
+  const expiringAdvice = window.pooled && window.pace && window.pace.expiringAccounts.length > 0
+    ? `优先使用 ${window.pace.expiringAccounts.join("、")}：24 小时内重置，其周余量合计占当前池 ${recoveryNumber(window.pace.expiringRemainingPercent)} 个百分点。需优先使用这些账号，整池节奏仍为${window.pace.label}。`
+    : null;
   return <li className="limits-meter" data-pace={window.pace?.level} data-depleted={depleted || undefined} data-warning={remaining <= 20 && !depleted || undefined}>
     <div className="limits-meter-heading">
       <div className="limits-meter-title">
@@ -181,6 +184,10 @@ function WindowMeter({ window, now, mode }: { window: MeterWindow; now: number; 
       {window.recovery && window.recovery.usedPercent > 0 ? <RecoverySegments recovery={window.recovery} mode={mode} now={now} /> : <div className="limits-meter-fill" style={{ width: `${percent}%` }} />}
     </div>
     {window.pace && <div className="limits-meter-advice">
+      {expiringAdvice && <span className="limits-pace" data-level="generous" role="note"
+        aria-label={`临期使用建议：临期额度可多用。${expiringAdvice}`} title={expiringAdvice}>
+        <span className="limits-pace-scope">临期额度</span><span>可多用</span>
+      </span>}
       <span className="limits-pace" data-level={window.pace.level} role="note"
           aria-label={`周额度建议：${window.pace.label}。${window.pooled ? "整池节奏。" : ""}${window.pace.reason}`} title={window.pace.reason}>{window.pooled ? <><span className="limits-pace-scope">整池节奏</span><span>{window.pace.label}</span></> : window.pace.label}</span>
     </div>}
