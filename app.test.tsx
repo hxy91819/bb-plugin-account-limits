@@ -1472,3 +1472,59 @@ test("小窗可直接切换模式与视图，保持服务选择、偏好共享�
   assert.equal(dom.window.localStorage.getItem("account-limits.display-mode"), "remaining");
   assert.equal(dom.window.localStorage.getItem("account-limits.view"), "accounts");
 });
+
+
+test("account views show the nearest weekly reset first in both panels and every source, including legacy windows", async t => {
+  installTestPluginRuntime();
+  const now = Date.parse("2026-10-28T00:00:00Z");
+  t.mock.timers.enable({ apis: ["Date"], now });
+  t.after(() => dom.window.localStorage.clear());
+  const at = (hours: number) => new Date(now + hours * 3_600_000).toISOString();
+  for (const source of ["cliproxy", "account-pool", "bb-providers"] as const) {
+    for (const legacy of [false, true]) {
+      dom.window.localStorage.clear();
+      const app = await loadPluginApp(() => import("./app.js"));
+      const footer = app.experimentalSidebarFooterItems[0]!;
+      if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+      const accounts = [
+        { key: "later", label: "Later", weight: 1, usage: { status: "ok" as const, planLabel: "Pro", windows: [
+          { label: "Weekly limit", usedPercent: 50, resetsAt: at(48) },
+          { label: "5-hour limit", usedPercent: 10, resetsAt: at(0.1) },
+        ] } },
+        { key: "unknown", label: "Unknown", weight: 1, usage: { status: "ok" as const, planLabel: "Pro", windows: [
+          { label: "Weekly limit", usedPercent: 20, resetsAt: null },
+        ] } },
+        { key: "sooner", label: "Sooner", weight: 1, usage: { status: "ok" as const, planLabel: "Pro", windows: [
+          { label: "Weekly limit", usedPercent: 80, resetsAt: at(2) },
+          { label: "Weekly scoped limit", usedPercent: 30, resetsAt: at(24) },
+        ] } },
+      ];
+      const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: source, source, displayName: "Demo", status: "connected", error: null,
+        providers: [{ id: source === "cliproxy" ? "cliproxy-claude" : source === "account-pool" ? "account-pool:claude-code" : "claude-code",
+          displayName: "Claude", updatedAt: at(0), accounts: legacy ? [] : accounts,
+          usage: { status: "ok", planLabel: "Pro", windows: legacy ? accounts.flatMap(account => account.usage.windows.map(window =>
+            ({ ...window, accountLabel: account.label, label: `${account.label} · ${window.label}` }))) : [] },
+        }] }] };
+      const before = structuredClone(snapshot);
+      let reads = 0;
+      const rpc = { readAccountLimits: () => { reads++; return snapshot; } };
+      const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
+      const compact = renderSlot(footer, { dismiss() {} }, { rpc });
+      try {
+        await within(full.container).findByText("Sooner");
+        await within(compact.container).findByText("Sooner");
+        const order = (container: HTMLElement) => [...container.querySelectorAll('section[aria-label$=" 的额度"]')]
+          .map(section => section.getAttribute("aria-label"));
+        const expected = ["Sooner 的额度", "Later 的额度", "Unknown 的额度"];
+        assert.deepEqual(order(full.container), expected, `${source}/${legacy}: full`);
+        assert.deepEqual(order(compact.container), expected, `${source}/${legacy}: compact`);
+        if (!legacy) assert.deepEqual([...full.container.querySelectorAll(".limits-account-index")].map(node => node.textContent), ["01", "02", "03"]);
+        await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
+        assert.deepEqual(order(full.container), expected);
+        assert.deepEqual(order(compact.container), expected);
+        assert.deepEqual(snapshot, before, "Display sorting preserves source observations and pool inputs");
+        assert.equal(reads, 1, "Sorting and switching display mode do not fetch quotas");
+      } finally { compact.lifecycle.unmount(); full.lifecycle.unmount(); }
+    }
+  }
+});

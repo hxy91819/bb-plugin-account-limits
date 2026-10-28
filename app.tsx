@@ -4,7 +4,7 @@ import { definePluginApp, experimental_Icon as BbIcon, useBbNavigate } from "@ge
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
 import { aggregateCliproxyPool, groupAccountPools, groupAccountTypes, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
 import { AntigravityIcon, GrokIcon, ProviderBrandIcon, providerBrand } from "./provider-icons.js";
-import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, quotaTone, formatQuotaPercent, quotaWindowDisplayLabel, quotaWindowPeriod, type QuotaUiStore } from "./quota-presentation.js";
+import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, orderAccountsByReset, quotaTone, formatQuotaPercent, quotaWindowDisplayLabel, quotaWindowPeriod, type QuotaUiStore } from "./quota-presentation.js";
 import { useQuotaData, useQuotaPreference, useQuotaChoicePreference } from "./quota-ui.js";
 import { panelStyles } from "./panel-styles.js";
 import { buildPoolRecovery, type PoolRecovery } from "./pool-recovery.js";
@@ -330,10 +330,12 @@ function Usage({ providerId, usage, now, mode, updatedAt = null }: { providerId:
   if (usage.status === "ok") {
     if (usage.windows.length === 0) return <p className="limits-message">未报告额度窗口。</p>;
     return <div className="limits-accounts">
-      {groupWindowsByAccount(usage.windows).map(([accountLabel, windows]) => <section key={accountLabel} aria-label={`${accountLabel} 的额度`} className="limits-account">
-        <h3 className="limits-account-name" title={accountLabel}>{accountLabel}</h3>
-        <QuotaWindows providerId={providerId} windows={accountWindows({ key: accountLabel, label: accountLabel, weight: 1,
-          usage: { status: "ok", planLabel: usage.planLabel, windows: windows.map(window => ({ ...window, label: displayWindowLabel(window) })) } }, now, updatedAt)} now={now} mode={mode} />
+      {orderAccountsByReset(groupWindowsByAccount(usage.windows).map(([accountLabel, windows]) => ({
+        key: accountLabel, label: accountLabel, weight: 1,
+        usage: { status: "ok", planLabel: usage.planLabel, windows: windows.map(window => ({ ...window, label: displayWindowLabel(window) })) },
+      })), now).map(account => <section key={account.key} aria-label={`${account.label} 的额度`} className="limits-account">
+        <h3 className="limits-account-name" title={account.label}>{account.label}</h3>
+        <QuotaWindows providerId={providerId} windows={accountWindows(account, now, updatedAt)} now={now} mode={mode} />
       </section>)}
     </div>;
   }
@@ -348,7 +350,7 @@ function Usage({ providerId, usage, now, mode, updatedAt = null }: { providerId:
 function AccountUsage({ provider, now, mode }: { provider: PanelProvider; now: number; mode: DisplayMode }) {
   if (provider.accounts.length === 0) return <Usage providerId={provider.id} usage={provider.usage} now={now} mode={mode} updatedAt={provider.updatedAt} />;
   return <div className="limits-accounts">
-    {provider.accounts.map((account, index) => <section key={account.key} aria-label={`${account.label} 的额度`}
+    {orderAccountsByReset(provider.accounts, now).map((account, index) => <section key={account.key} aria-label={`${account.label} 的额度`}
       className="limits-account">
       <div className="limits-identity">
         <span className="limits-account-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
@@ -607,7 +609,7 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
           {activeMetrics.filter(metric => metric.partial).map(metric => <p key={metric.key} className="limits-partial-note" role="note">
             * {metric.label === "周" ? "总周额度" : metric.fullLabel}按 {metric.reportingAccounts}/{metric.totalAccounts} 个账号计算；{metric.missingWeeklyAccounts > 0 ? `${metric.missingWeeklyAccounts} 个账号未返回总周额度，缺失部分单独展示。` : `${metric.totalAccounts - metric.reportingAccounts} 个账号未返回该窗口，缺失部分不计入百分比。`}
           </p>)}
-          {view === "pool" ? <PoolUsage provider={active.provider} now={now} mode={mode} /> : active.provider.accounts.length ? active.provider.accounts.map(account => <section key={account.key} className="limits-compact-account" aria-label={`${account.label} 的额度`}>
+          {view === "pool" ? <PoolUsage provider={active.provider} now={now} mode={mode} /> : active.provider.accounts.length ? orderAccountsByReset(active.provider.accounts, now).map(account => <section key={account.key} className="limits-compact-account" aria-label={`${account.label} 的额度`}>
             <div className="limits-compact-identity"><h3 title={account.label}>{account.label}</h3>{account.usage.status === "ok" && account.usage.planLabel && <span title={account.usage.planLabel}>{account.usage.planLabel}</span>}</div>
             {account.usage.status === "ok" ? account.usage.windows.length ? <QuotaWindows providerId={active.provider.id} windows={accountWindows(account, now, active.provider.updatedAt).map(window => ({ ...window, displayLabel: shortWindowLabel(window.label) === "周" ? "周额度" : undefined }))} now={now} mode={mode} /> : <p className="limits-message">未报告额度窗口。</p>
               : <Usage providerId={active.provider.id} usage={account.usage} now={now} mode={mode} />}

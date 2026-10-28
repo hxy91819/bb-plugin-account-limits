@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowPeriod, quotaAlerts, quotaTone } from "./quota-presentation.js";
-import type { AccountLimitsPanelSnapshot } from "./contract.js";
+import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowPeriod, quotaAlerts, quotaTone, orderAccountsByReset } from "./quota-presentation.js";
+import type { AccountLimitsPanelSnapshot, QuotaAccount } from "./contract.js";
 import type { WeeklyPace } from "./weekly-pace.js";
 
 const snapshot = (usedPercent = 85, includeFailure = false): AccountLimitsPanelSnapshot => ({ machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
@@ -631,4 +631,37 @@ test("compactPoolSummaries accurately reflects reporting, total, and missing-wee
   assert.equal(unknownShortSummaries[0]!.totalAccounts, 2);
   assert.equal(unknownShortSummaries[0]!.missingWeeklyAccounts, 0);
   assert.equal(unknownShortSummaries[0]!.partial, false);
+});
+
+
+test("account reset order favors weekly budgets, preserves ties and input, and puts pending or unknown resets last", () => {
+  const now = Date.parse("2026-10-28T00:00:00Z");
+  const window = (label: string, hours: number | null) => ({ label, usedPercent: 20,
+    resetsAt: hours === null ? null : new Date(now + hours * 3_600_000).toISOString() });
+  const account = (key: string, windows: ReturnType<typeof window>[]): QuotaAccount =>
+    ({ key, label: key, weight: 1, usage: { status: "ok", planLabel: "Pro", windows } });
+  const accounts: QuotaAccount[] = [
+    account("late-week-fast-session", [window("5-hour limit", 0.1), window("Weekly limit", 48)]),
+    account("unknown-week", [window("5-hour limit", 0.01), window("Weekly limit", null)]),
+    account("early-week", [window("5-hour limit", 4), window("Weekly limit", 1)]),
+    account("same-week", [window("Weekly limit", 1)]),
+    account("multi-family", [window("Gemini Models: Weekly limit", 12), window("Claude and GPT models: Weekly limit", 2)]),
+    account("cap-only", [window("5-hour limit", 0.2), window("Weekly scoped limit", 3)]),
+    account("only-session", [window("5-hour limit", 4)]),
+    account("overdue", [window("Weekly limit", -1)]),
+    account("malformed", [{ ...window("Weekly limit", 1), resetsAt: "invalid" }]),
+    { key: "failed", label: "failed", weight: 1, usage: { status: "error", message: "offline" } },
+    account("no-windows", []),
+  ];
+  const before = structuredClone(accounts);
+  for (const entry of accounts) {
+    if (entry.usage.status === "ok") Object.freeze(entry.usage.windows);
+    Object.freeze(entry);
+  }
+  Object.freeze(accounts);
+  assert.deepEqual(orderAccountsByReset(accounts, now).map(entry => entry.key), [
+    "early-week", "same-week", "multi-family", "cap-only", "only-session", "late-week-fast-session",
+    "overdue", "unknown-week", "malformed", "failed", "no-windows",
+  ]);
+  assert.deepEqual(accounts, before, "Sorting must not change source order or quota observations");
 });

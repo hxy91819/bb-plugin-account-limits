@@ -33,6 +33,22 @@ export function visibleQuota(snapshot: AccountLimitsPanelSnapshot | null, hideFa
   }) };
 }
 
+export function orderAccountsByReset(accounts: readonly QuotaAccount[], now: number): QuotaAccount[] {
+  return accounts.map(account => {
+    const windows = account.usage.status === "ok" ? account.usage.windows : [];
+    const weekly = windows.filter(window => isWeeklyBudget(window.label));
+    const other = windows.filter(window => quotaWindowPeriod(window.label)?.period !== "5h");
+    const primary = weekly.length ? weekly : other.length ? other : windows;
+    const resets = primary.flatMap(window => {
+      const time = window.resetsAt ? Date.parse(window.resetsAt) : NaN;
+      return Number.isFinite(time) ? [time] : [];
+    });
+    const upcoming = resets.filter(time => time > now);
+    const time = Math.min(...(upcoming.length ? upcoming : resets));
+    return { account, time, rank: upcoming.length ? 0 : resets.length ? 1 : 2 };
+  }).sort((a, b) => a.rank - b.rank || (a.time === b.time ? 0 : a.time - b.time)).map(entry => entry.account);
+}
+
 export type QuotaRead = (input: AccountLimitsReadInput) => Promise<AccountLimitsPanelSnapshot>;
 export interface QuotaUiState {
   snapshot: AccountLimitsPanelSnapshot | null;

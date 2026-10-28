@@ -2,6 +2,8 @@
 
 ## 0.4.0
 
+- Sort account views by the nearest upcoming weekly reset in both panels; keep pending and unknown times after upcoming resets without changing pool inputs.
+
 - Add locally bundled official provider artwork to compact cards and service headers, with original colors, portable source files and attribution; keep unknown-service fallbacks.
 
 - Put subscription tiers first in readable, wrapping compact cards; keep model labels on one line and expose used/remaining and account/pool controls directly.
