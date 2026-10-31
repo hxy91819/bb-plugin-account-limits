@@ -4,7 +4,90 @@ import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { execFileSync } from "node:child_process";
-import { cliproxyAccountsFromAuthFiles, discoveredCliproxyGroups, normalizeAntigravityUsage, normalizeClaudeUsage, normalizeCliproxyCachedUsage, normalizeCliproxyCodexUsage, normalizeGrokUsage, normalizeKimiUsage, readCliproxyProviderUsage, readCliproxyUsage } from "./usage.js";
+import { cliproxyAccountsFromAuthFiles, discoveredCliproxyGroups, normalizeAntigravityUsage, normalizeClaudeUsage, normalizeCliproxyCachedUsage, normalizeCliproxyCodexUsage, normalizeGrokUsage, normalizeKimiUsage, readCliproxyProviderAccountUsages, readCliproxyProviderUsage, readCliproxyUsage } from "./usage.js";
+import { groupAccountPools } from "./pool.js";
+
+test("CLI Proxy Claude profile separates Pro, Max multipliers, Team seats and unknown plans", async () => {
+  const originalFetch = globalThis.fetch;
+  const profiles = [
+    { organization_type: "claude_pro", rate_limit_tier: "default_claude_ai" },
+    { organization_type: "claude_max", rate_limit_tier: "default_claude_max_5x" },
+    { organization_type: "claude_max", rate_limit_tier: "default_claude_max_20x" },
+    { organization_type: "claude_team", rate_limit_tier: "default_claude_max_5x", seat_tier: "team_tier_1" },
+    { organization_type: "claude_team", rate_limit_tier: "default_claude_max_5x", seat_tier: "team_tier_2" },
+    { organization_type: "claude_max" },
+  ];
+  const accounts = profiles.map((_, index) => ({ provider: "claude", authIndex: String(index), label: `Account ${index}` }));
+  globalThis.fetch = async (input, init) => {
+    assert.equal(String(input), "http://cliproxy.test/v0/management/api-call");
+    const call = JSON.parse(String(init?.body));
+    assert.equal(call.method, "GET");
+    assert.equal(call.header.Authorization, "Bearer $TOKEN$");
+    const body = call.url.endsWith("/profile")
+      ? { organization: profiles[Number(call.auth_index)], account: { email: "fictional@example.com", uuid: "private-profile-id" } }
+      : { limits: [{ kind: "weekly_all", percent: Number(call.auth_index) * 10, resets_at: "2026-11-05T10:00:00Z" }] };
+    return new Response(JSON.stringify({ status_code: 200, body: JSON.stringify(body) }));
+  };
+  try {
+    const results = await readCliproxyProviderAccountUsages(accounts, {
+      managementBaseUrl: "http://cliproxy.test/v0/management",
+      authFiles: { files: accounts.map(account => ({ provider: "claude", auth_index: account.authIndex })) },
+    });
+    const quotas = results.map(entry => {
+      assert.ok(entry.result.supported && entry.result.usage.status === "ok");
+      return { key: entry.key, label: entry.label, weight: entry.weight, usage: {
+        status: "ok" as const,
+        planLabel: entry.result.usage.planLabel ?? null,
+        windows: entry.result.usage.windows.map(window => ({ label: window.label, usedPercent: window.usedPercent, resetsAt: window.resetsAt ?? null })),
+      } };
+    });
+    assert.deepEqual(groupAccountPools("cliproxy-claude", quotas).map(group => ({ label: group.label, accounts: group.accounts.length })), [
+      { label: "Pro", accounts: 1 },
+      { label: "Max 5x", accounts: 1 },
+      { label: "Max 20x", accounts: 1 },
+      { label: "Team 5x · team_tier_1", accounts: 1 },
+      { label: "Team 5x · team_tier_2", accounts: 1 },
+      { label: "套餐未识别", accounts: 1 },
+    ]);
+    assert.deepEqual(quotas.map(account => account.usage.windows[0].usedPercent), [0, 10, 20, 30, 40, 50]);
+    assert.doesNotMatch(JSON.stringify(results), /private-profile-id|fictional@example.com/);
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
+test("Claude profile failures preserve quota; cached quota retains a verified tier", async () => {
+  const originalFetch = globalThis.fetch;
+  try {
+    for (const scenario of ["profile-403", "profile-network", "cached", "no-quota"] as const) {
+      globalThis.fetch = async (_input, init) => {
+        const call = JSON.parse(String(init?.body));
+        const profile = call.url.endsWith("/profile");
+        if (profile && scenario === "profile-network") throw new Error("offline");
+        const status = profile ? scenario === "profile-403" ? 403 : 200 : scenario === "cached" || scenario === "no-quota" ? 403 : 200;
+        const body = profile ? { organization: { organization_type: "claude_max", rate_limit_tier: "default_claude_max_20x" } }
+          : { limits: [{ kind: "weekly_all", percent: 42, resets_at: "2026-11-05T10:00:00Z" }] };
+        return new Response(JSON.stringify({ status_code: status, body: JSON.stringify(body) }));
+      };
+      const result = await readCliproxyUsage({ provider: "claude", authIndex: "account-1", label: "Account 1" }, {
+        managementBaseUrl: "http://cliproxy.test/v0/management",
+        authFiles: { files: [{ provider: "claude", auth_index: "account-1", ...(scenario === "cached" ? {
+          quota: { signals: { "Anthropic-Ratelimit-Unified-7d-Utilization": "0.42" } },
+        } : {}) }] },
+      });
+      assert.ok(result.supported);
+      if (scenario === "no-quota") {
+        assert.equal(result.usage.status, "error");
+      } else {
+        assert.ok(result.usage.status === "ok");
+        assert.equal(result.usage.planLabel, scenario === "cached" ? "Max 20x (cached)" : "Account 1");
+        assert.equal(result.usage.windows[0].usedPercent, 42);
+      }
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
 
 test("Claude usage converts Cliproxy's official usage response into BB windows", () => {
   const result = normalizeClaudeUsage({ limits: [
@@ -180,7 +263,7 @@ test("Cliproxy queries the selected credential, uses token substitution only ins
     });
     assert.ok(result.supported && result.usage.status === "ok");
     assert.equal(result.usage.planLabel, "Claude work (cached)");
-    assert.equal(requests.length, 2);
+    assert.equal(requests.length, 3);
     assert.equal(new Headers(requests[0].init?.headers).get("authorization"), "Bearer test-management-key");
     const apiCall = JSON.parse(String(requests[1].init?.body));
     assert.deepEqual(apiCall.header, { Authorization: "Bearer $TOKEN$", "anthropic-beta": "oauth-2025-04-20" });

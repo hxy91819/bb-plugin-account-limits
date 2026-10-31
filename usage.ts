@@ -153,6 +153,26 @@ function hasOkUsage(result: ProviderUsageResult): boolean {
   return asRecord(result.usage)?.status === "ok";
 }
 
+function claudePlanLabel(profile: unknown): string | null {
+  const organization = asRecord(asRecord(profile)?.organization);
+  const type = asString(organization?.organization_type);
+  const family = type ? ({ claude_pro: "Pro", claude_max: "Max", claude_team: "Team", claude_enterprise: "Enterprise" } as Record<string, string>)[type] : null;
+  if (!family) return null;
+  const tier = asString(organization?.rate_limit_tier);
+  // A Max family alone cannot distinguish 5x from 20x. Do not guess its pool.
+  if (!tier && family !== "Pro") return null;
+  const multiplier = tier ? /_([1-9]\d*)x$/u.exec(tier)?.[1] : null;
+  const standardPro = family === "Pro" && (!tier || ["default_claude_ai", "default_claude_pro"].includes(tier));
+  const label = multiplier ? `${family} ${multiplier}x` : standardPro ? family : `${family} · ${tier}`;
+  const seat = ["Team", "Enterprise"].includes(family) ? asString(organization?.seat_tier) : null;
+  return seat ? `${label} · ${seat}` : label;
+}
+
+function withClaudePlan(result: ProviderUsageResult, planLabel: string | null, cached = false): ProviderUsageResult {
+  if (!planLabel || !result.supported || result.usage.status !== "ok") return result;
+  return { ...result, usage: { ...result.usage, planLabel: `${planLabel}${cached ? " (cached)" : ""}` } };
+}
+
 function labelForClaudeLimit(limit: JsonRecord): string {
   const kind = asString(limit.kind) ?? asString(limit.group) ?? "quota";
   const labels: Record<string, string> = {
@@ -463,16 +483,17 @@ async function callCliproxyApi(
   return { status, body };
 }
 
-async function readClaudeUsageThroughCliproxy(
+async function readClaudeResourceThroughCliproxy(
   managementBaseUrl: string,
   managementKey: string | undefined,
   authIndex: string,
   signal: AbortSignal | undefined,
   timeoutMs: number,
+  resource: "usage" | "profile",
 ): Promise<{ status: number; body: unknown }> {
   return callCliproxyApi(managementBaseUrl, managementKey, authIndex, {
     method: "GET",
-    url: "https://api.anthropic.com/api/oauth/usage",
+    url: `https://api.anthropic.com/api/oauth/${resource}`,
     header: { Authorization: "Bearer $TOKEN$", "anthropic-beta": "oauth-2025-04-20" },
   }, signal, timeoutMs);
 }
@@ -600,13 +621,17 @@ async function readCliproxyAccountUsage(
   const timeoutMs = options.timeoutMs ?? 20_000;
   const authIndex = asString(selected.auth_index) ?? asString(selected.authIndex);
   if (account.provider.toLowerCase() === "claude" && authIndex) {
-    const upstream = await readClaudeUsageThroughCliproxy(managementBaseUrl, options.managementKey, authIndex, options.signal, timeoutMs);
+    const [upstream, profile] = await Promise.all([
+      readClaudeResourceThroughCliproxy(managementBaseUrl, options.managementKey, authIndex, options.signal, timeoutMs, "usage"),
+      readClaudeResourceThroughCliproxy(managementBaseUrl, options.managementKey, authIndex, options.signal, timeoutMs, "profile").catch(() => null),
+    ]);
+    const planLabel = profile && profile.status >= 200 && profile.status < 300 ? claudePlanLabel(profile.body) : null;
     if (upstream.status >= 200 && upstream.status < 300) {
       const normalized = normalizeClaudeUsage(upstream.body, account);
-      if (hasOkUsage(normalized)) return normalized;
+      if (hasOkUsage(normalized)) return withClaudePlan(normalized, planLabel);
     }
     const cached = normalizeCliproxyCachedUsage(selected, account);
-    if (hasOkUsage(cached)) return cached;
+    if (hasOkUsage(cached)) return withClaudePlan(cached, planLabel, true);
     return usageError(`Cliproxy could not read Claude quota (${upstream.status}).`);
   }
   if (account.provider.toLowerCase() === "xai" && authIndex) {

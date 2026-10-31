@@ -84,6 +84,8 @@ CLI Proxy's API-key-only routes are not discovered as OAuth accounts. Muse can e
 
 ## Quota semantics
 
+CLI Proxy Claude reads the official OAuth profile alongside usage, so Pro, Max 5x, Max 20x, Team and Enterprise use separate subscription pools. Team/Enterprise seat tiers remain distinct when reported, even if their rate-limit multiplier matches a personal Max plan. Profile failures preserve usable quota in the unidentified cohort; verified tiers also label cached quota. Account records and Team seats are not counts of independent subscriptions. Antigravity's Claude/GPT allowance stays in its own source and model-family pool.
+
 Claude's all-model weekly allowance and Fable/Opus model caps have different denominators. Model caps appear under the total week and are never added to it. Accounts that do not report all-model weekly quota form a separate pool.
 
 Pool averages use `poolWeight` (default 1); reset segments use each account's own timestamp. Weekly advice compares remaining quota with a uniform seven-day budget, with individual near-reset opportunities in its hover explanation. A visible nearest-reset summary identifies only the earliest reported batch; its percentages always mean each account's remaining week, even in used mode. Hover shows the individual accounts. Fully unused accounts stay included, overdue/stale observations await confirmation, and unknown reset times are explicit. It is an estimate of spending pace, not a prediction of future consumption. Stale, incomplete or overdue measurements are not promoted to available quota.
