@@ -84,7 +84,7 @@ CLI Proxy's API-key-only routes are not discovered as OAuth accounts. Muse can e
 
 ## Quota semantics
 
-CLI Proxy Claude reads the official OAuth profile alongside usage, so Pro, Max 5x, Max 20x, Team and Enterprise use separate subscription pools. Team/Enterprise seat tiers remain distinct when reported, even if their rate-limit multiplier matches a personal Max plan. Profile failures preserve usable quota in the unidentified cohort; verified tiers also label cached quota. Account records and Team seats are not counts of independent subscriptions. Antigravity's Claude/GPT allowance stays in its own source and model-family pool.
+CLI Proxy Claude reads the official OAuth profile alongside usage, so Pro, Max 5x, Max 20x, Team and Enterprise use separate subscription pools. Team/Enterprise seat tiers remain distinct when reported, even if their rate-limit multiplier matches a personal Max plan. Profile failures preserve usable quota in the unidentified cohort; verified tiers also label cached quota. Upstream-disabled credentials are excluded from discovery and capacity without changing their state. Account records and Team seats are not counts of independent subscriptions. Antigravity's Claude/GPT allowance stays in its own source and model-family pool.
 
 Claude's all-model weekly allowance and Fable/Opus model caps have different denominators. Model caps appear under the total week and are never added to it. Accounts that do not report all-model weekly quota form a separate pool.
 

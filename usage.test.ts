@@ -89,6 +89,26 @@ test("Claude profile failures preserve quota; cached quota retains a verified ti
   }
 });
 
+test("disabled upstream credentials cannot contribute cached quota or trigger profile requests", async () => {
+  const originalFetch = globalThis.fetch;
+  globalThis.fetch = async () => { throw new Error("Disabled credentials must not be queried"); };
+  try {
+    for (const disabled of [{ disabled: true }, { status: "disabled" }]) {
+      const record = { provider: "claude", auth_index: "disabled-account", ...disabled,
+        quota: { signals: { "Anthropic-Ratelimit-Unified-7d-Utilization": "0.01" } } };
+      const authFiles = { files: [record] };
+      assert.deepEqual(cliproxyAccountsFromAuthFiles(authFiles), []);
+      const result = await readCliproxyUsage({ provider: "claude", authIndex: "disabled-account" }, {
+        managementBaseUrl: "http://cliproxy.test/v0/management", authFiles,
+      });
+      assert.ok(result.supported && result.usage.status === "error");
+      assert.match(result.usage.message, /credential is disabled/u);
+    }
+  } finally {
+    globalThis.fetch = originalFetch;
+  }
+});
+
 test("Claude usage converts Cliproxy's official usage response into BB windows", () => {
   const result = normalizeClaudeUsage({ limits: [
     { kind: "session", percent: 8, resets_at: "2026-09-09T11:00:00+00:00" },

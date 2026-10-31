@@ -91,6 +91,7 @@ export function cliproxyAccountsFromAuthFiles(
     : [];
   const accounts: CliproxyUsageAccount[] = [];
   for (const record of files) {
+    if (record.disabled === true || record.status === "disabled") continue;
     const provider = cliproxyRecordProvider(record);
     const authIndex = cliproxyRecordAuthIndex(record);
     if (!provider || !authIndex) continue;
@@ -617,6 +618,7 @@ async function readCliproxyAccountUsage(
   selected: JsonRecord,
   options: CliproxyUsageOptions,
 ): Promise<ProviderUsageResult> {
+  if (selected.disabled === true || selected.status === "disabled") return usageError("Cliproxy credential is disabled.");
   const managementBaseUrl = options.managementBaseUrl.replace(/\/$/, "");
   const timeoutMs = options.timeoutMs ?? 20_000;
   const authIndex = asString(selected.auth_index) ?? asString(selected.authIndex);
