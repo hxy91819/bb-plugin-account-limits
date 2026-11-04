@@ -284,3 +284,30 @@ test("typed pool resources keep stable IDs, isolated denominators and unchanged 
   assert.equal((await list(source)).resources.filter(r => r.id.startsWith("pool:"))[0]!.id, proId);
   await assert.rejects(() => get(source, ultraId, false), /no longer exists/u);
 });
+
+test("Claude weekly resource uses the same capacity ratios and estimate notice as the dashboard", async () => {
+  const make = (key: string, planLabel: string, usedPercent: number) => ({ key, label: `Fictional ${key}`, weight: 1,
+    usage: { status: "ok" as const, planLabel, windows: [
+      { label: "5-hour limit", usedPercent: 100, resetsAt: null },
+      { label: "Weekly limit", usedPercent, resetsAt: null },
+      { label: "Weekly scoped limit", usedPercent: 99, resetsAt: null },
+    ] } });
+  const accounts = [make("pro", "Pro", 100), make("ultra", "Ultra", 0), make("team", "Team 5x · team_tier_1", 40)];
+  const before = structuredClone(accounts);
+  const { source } = makeSource({ cached: [{ ...provider(accounts), updatedAtMs: 10 }] });
+  const resources = (await list(source)).resources;
+  const pools = resources.filter(r => r.id.startsWith("pool:"));
+  assert.equal(pools.length, 1);
+  assert.match(pools[0]!.label, /含估算/u);
+  const measured = await get(source, pools[0]!.id, false);
+  assert.ok(usageMeasurementSchema.safeParse(measured).success);
+  assert.ok(measured.usage.status === "ok");
+  assert.match(measured.usage.planLabel!, /Team.*×5.*估算/u);
+  assert.equal(measured.usage.windows.length, 1);
+  assert.equal(measured.usage.windows[0]!.id, "7d");
+  assert.equal(measured.usage.windows[0]!.usedPercent, 300 / 16);
+  const individual = await get(source, "account:claude:team", false);
+  assert.ok(individual.usage.status === "ok"); assert.equal(individual.usage.windows.length, 3);
+  assert.deepEqual(accounts, before);
+  await assert.rejects(() => get(source, "pool:claude:type-pro", false), /no longer exists/u);
+});

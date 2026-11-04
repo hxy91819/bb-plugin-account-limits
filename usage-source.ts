@@ -110,7 +110,7 @@ export function createCliproxyUsageSource(deps: CliproxyUsageSourceDeps) {
       for (const provider of await cachedProviders()) {
         const raw = provider.id.replace(/^cliproxy-/u, "");
         const providerId = sourceProviderId(raw);
-        for (const group of groupAccountPools(raw, provider.accounts)) {
+        for (const group of groupAccountPools(provider.id, provider.accounts)) {
           resources.push({
             accountKey: null, id: `pool:${raw}${group.id === "default" ? "" : `:${group.id}`}`, providerId,
             label: `池 · ${cliproxyProviderDisplayName(raw)}${group.label ? ` · ${group.label}` : ""}`,
@@ -151,7 +151,7 @@ export function createCliproxyUsageSource(deps: CliproxyUsageSourceDeps) {
       }
       const accountFields = { plan: null, accountEmail: null, planLabel: null };
       if (parsed.kind === "pool") {
-        const group = groupAccountPools(parsed.provider, provider.accounts).find(group => group.id === parsed.poolGroup);
+        const group = groupAccountPools(providerId, provider.accounts).find(group => group.id === parsed.poolGroup);
         if (!group) throw new Error("Usage resource no longer exists.");
         const pool = aggregateCliproxyPool(group.accounts);
         if (pool.status !== "ok") {
@@ -163,7 +163,7 @@ export function createCliproxyUsageSource(deps: CliproxyUsageSourceDeps) {
           usage: {
             status: "ok",
             ...accountFields,
-            planLabel: `${pool.okAccounts}/${pool.totalAccounts} 账号`,
+            planLabel: `${pool.okAccounts}/${pool.totalAccounts} 账号${group.note ? ` · ${group.note}` : ""}`,
             windows: poolWindows(pool.windows),
           },
         };

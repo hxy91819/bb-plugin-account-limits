@@ -281,7 +281,7 @@ export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machi
         reportingAccounts: window.accounts,
         totalAccounts: typeAccounts.length,
         missingWeeklyAccounts: isWeeklyBudget(window.label) ? missingWeekly : 0,
-        detail: `${window.accounts} 个账号汇总 · 覆盖 ${window.accounts}/${typeAccounts.length}${group.label ? ` · ${group.label}` : ""}${missingWeekly && isWeeklyBudget(window.label) ? ` · ${missingWeekly} 个账号未返回总周额度` : ""}${partial ? " · * 仅统计已返回该窗口的账号，不代表全池额度" : ""}`,
+        detail: `${window.accounts} 个账号汇总 · 覆盖 ${window.accounts}/${typeAccounts.length}${group.label ? ` · ${group.label}` : ""}${group.note ? ` · ${group.note}` : ""}${missingWeekly && isWeeklyBudget(window.label) ? ` · ${missingWeekly} 个账号未返回总周额度` : ""}${partial ? " · * 仅统计已返回该窗口的账号，不代表全池额度" : ""}`,
         pace };
     });
   });

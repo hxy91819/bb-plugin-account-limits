@@ -157,9 +157,11 @@ function hasOkUsage(result: ProviderUsageResult): boolean {
 function claudePlanLabel(profile: unknown): string | null {
   const organization = asRecord(asRecord(profile)?.organization);
   const type = asString(organization?.organization_type);
-  const family = type ? ({ claude_pro: "Pro", claude_max: "Max", claude_team: "Team", claude_enterprise: "Enterprise" } as Record<string, string>)[type] : null;
+  const family = type ? ({ claude_pro: "Pro", claude_max: "Max", claude_ultra: "Ultra", claude_team: "Team", claude_enterprise: "Enterprise" } as Record<string, string>)[type] : null;
   if (!family) return null;
   const tier = asString(organization?.rate_limit_tier);
+  // Official migration: Max 20x is now Ultra, with 10x Pro weekly capacity.
+  if (family === "Ultra" || family === "Max" && tier && /_20x$/u.test(tier)) return "Ultra";
   // A Max family alone cannot distinguish 5x from 20x. Do not guess its pool.
   if (!tier && family !== "Pro") return null;
   const multiplier = tier ? /_([1-9]\d*)x$/u.exec(tier)?.[1] : null;

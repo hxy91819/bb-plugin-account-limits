@@ -1,7 +1,7 @@
 import type { QuotaAccount } from "./contract.js";
 
 /**
- * Cliproxy 池级聚合：先按套餐类型及 Claude 全模型周额度的可用性分池，再合并各池的窗口。
+ * 池级聚合：按来源内兼容套餐及 Claude 总周窗口可用性分组；官方 Claude 周汇总有显式容量策略。
  * server（Provider Usage 来源）和 app（“账户额度”池视图）共用，保持纯函数、不引 Node API。
  */
 
@@ -86,6 +86,39 @@ export interface AccountPoolType {
   id: string;
   label: string | null;
   accounts: readonly QuotaAccount[];
+  note?: string;
+}
+
+/** Weekly ratios only. Team's reported multiplier is an explicitly estimated ratio. */
+function claudeWeeklyCapacity(account: QuotaAccount): { weight: number; estimated: boolean } | null {
+  if (account.usage.status !== "ok") return null;
+  const rawPlan = account.usage.planLabel?.replace(/ \(cached\)$/iu, "").trim().replace(/\s+/gu, " ");
+  const plan = rawPlan?.toLowerCase();
+  if (!plan || plan === account.label.trim().toLowerCase() || rawPlan === account.key || plan.includes("@")) return null;
+  const official: Record<string, number> = { pro: 1, "max 5x": 5, ultra: 10, "max 20x": 10 };
+  if (Object.hasOwn(official, plan)) return { weight: official[plan]!, estimated: false };
+  const team = /^team ([1-9]\d*)x(?: · [\w-]+)?$/u.exec(plan);
+  return team && Number.isFinite(Number(team[1])) ? { weight: Number(team[1]), estimated: true } : null;
+}
+
+const CLAUDE_WEEKLY_POOL = "claude-weighted-weekly";
+
+/** Source-local exception to tier grouping; retains every raw account/window. */
+export function groupProviderAccountTypes(providerId: string, accounts: readonly QuotaAccount[]): AccountPoolType[] {
+  if (providerId !== "cliproxy-claude") return groupAccountTypes(accounts);
+  const known = accounts.filter(account => claudeWeeklyCapacity(account) !== null);
+  if (!known.length) return groupAccountTypes(accounts);
+  const estimated = known.filter(account => claudeWeeklyCapacity(account)!.estimated);
+  const multipliers = [...new Set(estimated.map(account => claudeWeeklyCapacity(account)!.weight))].sort((a, b) => a - b);
+  return [{ id: CLAUDE_WEEKLY_POOL, label: estimated.length ? "周额度汇总（含估算）" : "周额度加权汇总", accounts: known,
+    note: `周权重：Pro ×1、Max ×5、Ultra（原 Max 20x）×10。${estimated.length ? `Team 按账号报告倍率 ${multipliers.map(weight => `×${weight}`).join(" / ")} 估算（${estimated.length} 个账号），并非官方周额度比例。` : ""}仅合并全模型周额度；5h 和模型上限见账号明细。`,
+  }, ...groupAccountTypes(accounts.filter(account => claudeWeeklyCapacity(account) === null)).filter(group => group.accounts.length > 0)
+    .map(group => ({ ...group, label: group.label ?? "套餐未识别" }))];
+}
+
+/** Computed pool inputs; never stored in a source snapshot/cache. */
+export interface PoolAccount extends QuotaAccount {
+  poolWindowIds?: readonly string[];
 }
 
 /** A display label equal to an account identity is not subscription metadata. */
@@ -109,15 +142,16 @@ export function groupAccountTypes(accounts: readonly QuotaAccount[]): AccountPoo
 }
 
 export interface AccountPoolGroup extends AccountPoolType {
+  accounts: readonly PoolAccount[];
   typeId: string;
   typeLabel: string | null;
   kind: "default" | "without-weekly";
 }
 
-/** Tier boundaries apply to every provider; Claude weekly availability is nested within each tier. */
+/** Provider-aware capacity groups retain Claude's weekly-availability split. */
 export function groupAccountPools(providerId: string, accounts: readonly QuotaAccount[]): AccountPoolGroup[] {
   const claude = ["claude", "claude-code", "cliproxy-claude", "account-pool:claude-code"].includes(providerId);
-  return groupAccountTypes(accounts).flatMap(type => {
+  return groupProviderAccountTypes(providerId, accounts).flatMap(type => {
     const regular: QuotaAccount[] = [];
     const withoutWeekly: QuotaAccount[] = [];
     for (const account of type.accounts) {
@@ -129,7 +163,14 @@ export function groupAccountPools(providerId: string, accounts: readonly QuotaAc
     const group = (kind: AccountPoolGroup["kind"], members: readonly QuotaAccount[], suffix: string | null): AccountPoolGroup => ({
       id: kind === "default" ? type.id : type.id === "default" ? "without-weekly" : `${type.id}:without-weekly`,
       kind, typeId: type.id, typeLabel: type.label,
-      label: [type.label, suffix].filter(Boolean).join(" · ") || null, accounts: members,
+      label: [type.label, suffix].filter(Boolean).join(" · ") || null,
+      ...(type.note ? { note: type.note } : {}),
+      accounts: type.id === CLAUDE_WEEKLY_POOL ? members.map(account => ({ ...account,
+        weight: claudeWeeklyCapacity(account)!.weight * (Number.isFinite(account.weight) && account.weight > 0 ? account.weight : 1),
+        poolWindowIds: account.usage.status === "ok" ? account.usage.windows
+          .filter(window => normalizeCliproxyWindow(window.label).id === "7d")
+          .map(window => window.id ?? "7d") : [],
+      })) : members,
     });
     if (!withoutWeekly.length) return [group("default", type.accounts, null)];
     return [
@@ -140,7 +181,7 @@ export function groupAccountPools(providerId: string, accounts: readonly QuotaAc
 }
 
 /** 只统计 status=ok 的账号；没有任何 ok 账号时返回 error，绝不显示 0 用量。 */
-export function aggregateCliproxyPool(accounts: readonly QuotaAccount[]): CliproxyPoolUsage {
+export function aggregateCliproxyPool(accounts: readonly PoolAccount[]): CliproxyPoolUsage {
   if (accounts.length === 0) return { status: "error", message: "该供应商没有可用的账号。" };
   const okAccounts = accounts.filter(account => account.usage.status === "ok");
   if (okAccounts.length === 0) return { status: "error", message: "该供应商的全部账号额度查询均失败。" };
@@ -152,6 +193,7 @@ export function aggregateCliproxyPool(accounts: readonly QuotaAccount[]): Clipro
     for (const window of account.usage.windows) {
       const normalized = normalizeCliproxyWindow(window.label);
       const identity = { ...normalized, id: window.id ?? normalized.id };
+      if (account.poolWindowIds && !account.poolWindowIds.includes(identity.id)) continue;
       if (seen.has(identity.id)) continue;
       seen.add(identity.id);
       let group = groups.get(identity.id);

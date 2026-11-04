@@ -7,7 +7,7 @@ import { execFileSync } from "node:child_process";
 import { cliproxyAccountsFromAuthFiles, discoveredCliproxyGroups, normalizeAntigravityUsage, normalizeClaudeUsage, normalizeCliproxyCachedUsage, normalizeCliproxyCodexUsage, normalizeGrokUsage, normalizeKimiUsage, readCliproxyProviderAccountUsages, readCliproxyProviderUsage, readCliproxyUsage } from "./usage.js";
 import { groupAccountPools } from "./pool.js";
 
-test("CLI Proxy Claude profile separates Pro, Max multipliers, Team seats and unknown plans", async () => {
+test("CLI Proxy Claude profile identifies Ultra migration and combines supported weekly tiers", async () => {
   const originalFetch = globalThis.fetch;
   const profiles = [
     { organization_type: "claude_pro", rate_limit_tier: "default_claude_ai" },
@@ -16,6 +16,7 @@ test("CLI Proxy Claude profile separates Pro, Max multipliers, Team seats and un
     { organization_type: "claude_team", rate_limit_tier: "default_claude_max_5x", seat_tier: "team_tier_1" },
     { organization_type: "claude_team", rate_limit_tier: "default_claude_max_5x", seat_tier: "team_tier_2" },
     { organization_type: "claude_max" },
+    { organization_type: "claude_ultra" },
   ];
   const accounts = profiles.map((_, index) => ({ provider: "claude", authIndex: String(index), label: `Account ${index}` }));
   globalThis.fetch = async (input, init) => {
@@ -42,14 +43,11 @@ test("CLI Proxy Claude profile separates Pro, Max multipliers, Team seats and un
       } };
     });
     assert.deepEqual(groupAccountPools("cliproxy-claude", quotas).map(group => ({ label: group.label, accounts: group.accounts.length })), [
-      { label: "Pro", accounts: 1 },
-      { label: "Max 5x", accounts: 1 },
-      { label: "Max 20x", accounts: 1 },
-      { label: "Team 5x · team_tier_1", accounts: 1 },
-      { label: "Team 5x · team_tier_2", accounts: 1 },
+      { label: "周额度汇总（含估算）", accounts: 6 },
       { label: "套餐未识别", accounts: 1 },
     ]);
-    assert.deepEqual(quotas.map(account => account.usage.windows[0].usedPercent), [0, 10, 20, 30, 40, 50]);
+    assert.deepEqual(quotas.map(account => account.usage.planLabel), ["Pro", "Max 5x", "Ultra", "Team 5x · team_tier_1", "Team 5x · team_tier_2", "Account 5", "Ultra"]);
+    assert.deepEqual(quotas.map(account => account.usage.windows[0].usedPercent), [0, 10, 20, 30, 40, 50, 60]);
     assert.doesNotMatch(JSON.stringify(results), /private-profile-id|fictional@example.com/);
   } finally {
     globalThis.fetch = originalFetch;
@@ -80,7 +78,7 @@ test("Claude profile failures preserve quota; cached quota retains a verified ti
         assert.equal(result.usage.status, "error");
       } else {
         assert.ok(result.usage.status === "ok");
-        assert.equal(result.usage.planLabel, scenario === "cached" ? "Max 20x (cached)" : "Account 1");
+        assert.equal(result.usage.planLabel, scenario === "cached" ? "Ultra (cached)" : "Account 1");
         assert.equal(result.usage.windows[0].usedPercent, 42);
       }
     }

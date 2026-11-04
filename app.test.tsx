@@ -19,6 +19,43 @@ Object.assign(globalThis, {
 });
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
 
+test("Claude full and compact views share one estimated weekly pool and keep account detail", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.view", "pool");
+  const app = await loadPluginApp(() => import("./app.js"));
+  const plans = ["Pro", "Max 5x", "Ultra", "Ultra", "Ultra", "Ultra", "Team 5x · team_tier_1", "Team 5x · team_tier_2"];
+  const usage = [100, 40, 20, 80, 100, 100, 50, 30];
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "fictional-proxy", source: "cliproxy", displayName: "Proxy", status: "connected", error: null,
+    providers: [{ id: "cliproxy-claude", displayName: "Claude", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] },
+      accounts: plans.map((planLabel, i) => ({ key: `account-${i}`, label: `Fictional account ${i}`, weight: 1,
+        usage: { status: "ok", planLabel, windows: [
+          { label: "5-hour limit", usedPercent: 100, resetsAt: null },
+          { label: "Weekly limit", usedPercent: usage[i]!, resetsAt: null },
+          { label: "Weekly scoped limit", usedPercent: 90, resetsAt: null },
+        ] } })),
+    }],
+  }] };
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { full.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await full.findByText("Claude");
+  await act(async () => { full.getByRole("button", { name: "池" }).click(); });
+  const meter = full.getByRole("progressbar", { name: "7d 剩余额度" });
+  assert.ok(Math.abs(Number(meter.getAttribute("aria-valuenow")) - 1900 / 56) < 0.01);
+  assert.ok(full.getByText(/Team 按账号报告倍率 ×5 估算/u));
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+  const compact = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => compact.lifecycle.unmount());
+  const card = await compact.findByRole("button", { name: "Claude · 周额度汇总（含估算）" });
+  assert.equal(compact.container.querySelectorAll(".limits-compact-service").length, 1);
+  assert.equal(card.querySelector(".limits-compact-service-value")?.textContent, "33.9%");
+  assert.ok(within(compact.container).getByText(/Team 按账号报告倍率 ×5 估算/u));
+  await act(async () => { compact.getByRole("button", { name: "小窗：账号" }).click(); });
+  assert.equal(compact.container.querySelectorAll(".limits-compact-account").length, 8);
+  assert.equal(compact.container.querySelectorAll('[aria-label="5h 短期限制"]').length, 8);
+  assert.equal(snapshot.machines[0]!.providers[0]!.accounts[0]!.weight, 1);
+});
+
 test("sources fold independently, persist across mounts and absent proxies add no empty section", async t => {
   installTestPluginRuntime();
   dom.window.localStorage.clear();

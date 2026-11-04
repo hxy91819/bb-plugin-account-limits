@@ -429,21 +429,20 @@ test("a typed account losing quota cannot shrink its old pool into an individual
   assert.equal(track(recovered).length, 1, "Failure must not overwrite the previous complete pool level");
 });
 
-test("empty Claude observations block their tier across weekly-availability subpools", () => {
+test("empty Claude observations suppress the combined weekly pool until coverage recovers", () => {
   const valid = poolAlertSnapshot([100, 0, 79], { plans: ["Pro", "Pro", "Ultra"] });
   const provider = valid.machines[0]!.providers[0]!; provider.id = "cliproxy-claude";
-  for (const account of provider.accounts) if (account.usage.status === "ok") account.usage.windows[0]!.label = "Weekly scoped limit";
   const track = createQuotaAlertTracker(); track(valid);
   const empty = structuredClone(valid); const accounts = empty.machines[0]!.providers[0]!.accounts;
   if (accounts[1]!.usage.status !== "ok" || accounts[2]!.usage.status !== "ok") throw new Error("Fixture");
   accounts[1]!.usage.windows = [];
   accounts[2]!.usage.windows[0]!.usedPercent = 85;
   const alerts = track(empty);
-  assert.equal(alerts.length, 1); assert.match(alerts[0]!.title, /Ultra/u); assert.doesNotMatch(alerts[0]!.title, /Pro/u);
+  assert.equal(alerts.length, 0);
   assert.equal(track(valid).length, 0);
   const recovered = structuredClone(valid); const low = recovered.machines[0]!.providers[0]!.accounts[1]!.usage;
   if (low.status !== "ok") throw new Error("Fixture"); low.windows[0]!.usedPercent = 70;
-  assert.equal(track(recovered).length, 1, "Recovering a complete Pro cohort retains its earlier threshold history");
+  assert.equal(track(recovered).length, 1, "Recovering full coverage retains the combined pool's threshold history");
 });
 
 const fakePace = (level: WeeklyPace["level"]): WeeklyPace => ({
@@ -541,7 +540,7 @@ test("compactPoolSummaries accurately reflects reporting, total, and missing-wee
   ];
   const tierSummaries = compactPoolSummaries(claudeProvider, now);
   assert.equal(tierSummaries.length, 2);
-  const proSummary = tierSummaries.find(s => s.key.startsWith("type-pro:"))!;
+  const proSummary = tierSummaries.find(s => s.key.startsWith("claude-weighted-weekly:"))!;
   const teamSummary = tierSummaries.find(s => s.key.startsWith("type-team:"))!;
   assert.ok(proSummary);
   assert.ok(teamSummary);

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import { definePluginApp, experimental_Icon as BbIcon, useBbNavigate } from "@get-bb/plugin-sdk/app";
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
-import { aggregateCliproxyPool, groupAccountPools, groupAccountTypes, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
+import { aggregateCliproxyPool, groupAccountPools, groupProviderAccountTypes, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
 import { AntigravityIcon, GrokIcon, ProviderBrandIcon, providerBrand } from "./provider-icons.js";
 import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, orderAccountsByReset, quotaTone, formatQuotaPercent, quotaWindowDisplayLabel, quotaWindowPeriod, type QuotaUiStore } from "./quota-presentation.js";
 import { useQuotaData, useQuotaPreference, useQuotaChoicePreference } from "./quota-ui.js";
@@ -300,6 +300,7 @@ function PoolUsage({ provider, now, mode }: { provider: PanelProvider; now: numb
       className="limits-pool"
       aria-label={group.label ? `${group.label} 的池额度` : undefined}>
       <h3 className="limits-pool-label"><PanelIcon name="pool" />{group.label ?? "资源池"}<span className="limits-pool-count">{group.accounts.length} 个账号汇总</span></h3>
+      {group.note && <p className="limits-message" role="note">{group.note}</p>}
       <PoolGroupUsage providerId={provider.id} accounts={group.accounts} providerUsage={provider.usage} updatedAt={provider.updatedAt} now={now} mode={mode} />
     </section>)}
   </div>;
@@ -551,12 +552,13 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(timer); }, []);
   const snapshot = visibleQuota(rawSnapshot, hideFailures);
   const entries = snapshot?.machines.flatMap(machine => machine.providers.flatMap(provider =>
-    groupAccountTypes(provider.accounts).map(type => ({
+    groupProviderAccountTypes(provider.id, provider.accounts).map(type => ({
       key: JSON.stringify([machine.source, machine.id, provider.id, type.id]), machine,
       provider: { ...provider, accounts: [...type.accounts] },
       tier: type.label?.replace(/^Google AI /iu, "") ?? null,
       service: provider.displayName.replace(" (SDK)", "").replace(/^Gemini · /u, ""),
       name: `${provider.displayName}${type.label ? ` · ${type.label.replace(/^Google AI /iu, "")}` : ""}`,
+      note: type.note,
     })))) ?? [];
   const active = entries.find(entry => entry.key === selected) ?? entries[0];
   const activeMetrics = active ? compactPoolSummaries(active.provider, now) : [];
@@ -606,6 +608,7 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
         {active.machine.error && <p role="alert" className="limits-alert">{active.machine.error}</p>}
         {active.machine.status === "disconnected" ? <p className="limits-empty">此机器未连接，无法读取额度。</p> : <>
           <div className="limits-compact-context"><span title={`${sourceNames[active.machine.source ?? "cliproxy"]} · ${active.machine.displayName}`}>{sourceNames[active.machine.source ?? "cliproxy"]}</span><span>{mode === "used" ? "已用额度" : "剩余额度"} · {view === "pool" ? "池" : "账号"}</span></div>
+          {view === "accounts" && active.note && <p className="limits-message" role="note">{active.note}</p>}
           {activeMetrics.filter(metric => metric.partial).map(metric => <p key={metric.key} className="limits-partial-note" role="note">
             * {metric.label === "周" ? "总周额度" : metric.fullLabel}按 {metric.reportingAccounts}/{metric.totalAccounts} 个账号计算；{metric.missingWeeklyAccounts > 0 ? `${metric.missingWeeklyAccounts} 个账号未返回总周额度，缺失部分单独展示。` : `${metric.totalAccounts - metric.reportingAccounts} 个账号未返回该窗口，缺失部分不计入百分比。`}
           </p>)}
