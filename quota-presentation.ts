@@ -224,11 +224,24 @@ export function quotaWindowPeriod(label: string): { family: string; period: "5h"
 
 export type QuotaTone = "unknown" | "critical" | "warning" | "generous" | "normal";
 
+/** Lead with the usable expiring allowance; retain the long-term budget calculation. */
+export function weeklyPaceAdvice(pace: WeeklyPace): Pick<WeeklyPace, "level" | "label" | "reason"> & { prioritize: boolean } {
+  if (pace.expiringAccounts.length > 0 && pace.expiringRemainingPercent > 0
+    && ["normal", "conserve", "generous"].includes(pace.level)) {
+    const budget = pace.remainingPercent === undefined || pace.expectedPercent === undefined ? ""
+      : `（周余量 ${formatQuotaPercent(pace.remainingPercent, 1)}%，均匀使用基准约 ${formatQuotaPercent(pace.expectedPercent, 1)}%）`;
+    return { level: "generous", label: "快用临期额度", prioritize: true,
+      reason: `优先使用 ${pace.expiringAccounts.join("、")}：24 小时内重置，其周余量合计占当前池 ${formatQuotaPercent(pace.expiringRemainingPercent, 1)} 个百分点。整池长期节奏为${pace.label}${budget}。短期窗口和模型自身上限仍单独约束。` };
+  }
+  return { level: pace.level, label: pace.label, reason: pace.reason, prioritize: false };
+}
+
 export function quotaTone(usedPercent: number | null, pace?: WeeklyPace | null): QuotaTone {
   if (usedPercent === null || Number.isNaN(usedPercent)) return "unknown";
   if (usedPercent >= 90) return "critical";
-  if (pace?.level === "blocked" || pace?.level === "conserve") return "warning";
-  if (pace?.level === "generous") return "generous";
+  const level = pace ? weeklyPaceAdvice(pace).level : undefined;
+  if (level === "blocked" || level === "conserve") return "warning";
+  if (level === "generous") return "generous";
   if (usedPercent >= 80) return "warning";
   return "normal";
 }

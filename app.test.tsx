@@ -117,10 +117,10 @@ test("周额度建议覆盖两种来源和账号/池视图，模型上限与缺�
     assert.ok(within(slot.getByRole("region", { name: "旧版账号 的额度" })).getByRole("note", { name: /^周额度建议：可多用/u }));
     await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
     const pool = within(slot.getByRole("region", { name: "含全模型周额度 的池额度" }));
-    assert.ok(pool.getByRole("note", { name: /^周额度建议：正常用/u }));
+    assert.ok(pool.getByRole("note", { name: /^周额度建议：快用临期额度/u }));
     assert.equal(within(slot.getByRole("region", { name: "未报告全模型周额度 的池额度" })).queryByRole("note"), null);
     await act(async () => { slot.getByRole("button", { name: "已用（Used）" }).click(); });
-    assert.ok(pool.getByRole("note", { name: /^周额度建议：正常用/u }));
+    assert.ok(pool.getByRole("note", { name: /^周额度建议：快用临期额度/u }));
     await act(async () => { t.mock.timers.tick(61 * 60_000); });
     assert.ok(pool.getByRole("note", { name: /^周额度建议：暂不判断/u }));
     assert.equal(slot.inspection.rpcCalls.length, 1);
@@ -881,7 +881,7 @@ test("Gemini generous pace is colored independently from Claude/GPT in compact c
   assert.equal(metrics[1]!.getAttribute("data-tone"), "warning");
   assert.match(card.title, /Gem.*可多用/u);
   assert.match(card.title, /C\/G.*节约用/u);
-  assert.ok(within(compact.container).getByRole("note", { name: /^周额度建议：可多用/u }));
+  assert.ok(within(compact.container).getByRole("note", { name: /^周额度建议：快用临期额度/u }));
   assert.ok(compact.container.querySelector('.limits-meter[data-pace="generous"]'));
   const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
   t.after(() => full.lifecycle.unmount());
@@ -997,11 +997,10 @@ test("池把整池节奏和最近账号余量分开显示，两种来源及百�
     t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
     await slot.findByText("Claude");
     const weekly = within(slot.getByRole("group", { name: "周额度" }));
-    const advice = weekly.getByRole("note", { name: /^周额度建议：节约用/u });
-    assert.match(advice.textContent!, /整池节奏.*节约用/u);
-    const opportunity = weekly.getByRole("note", { name: /^临期使用建议：/u });
-    assert.equal(opportunity.textContent, "临期额度可多用");
-    assert.match(opportunity.title, /最近账号.*占当前池 12 个百分点.*整池节奏仍为节约用/u);
+    const opportunity = weekly.getByRole("note", { name: /^周额度建议：快用临期额度/u });
+    assert.equal(opportunity.textContent, "使用建议快用临期额度");
+    assert.match(opportunity.title, /最近账号.*占当前池 12 个百分点.*整池长期节奏为节约用/u);
+    assert.equal(weekly.queryByRole("note", { name: /^周额度建议：节约用/u }), null);
     const next = () => weekly.getByRole("note", { name: /^最近重置账号/u });
     assert.match(next().textContent!, /最近重置：7小时30分钟.*1 个账号.*周剩 60%.*建议先用/u);
     assert.match(next().getAttribute("title")!, /最近账号：周剩 60%/u);
@@ -1012,14 +1011,14 @@ test("池把整池节奏和最近账号余量分开显示，两种来源及百�
     assert.equal(slot.queryByRole("dialog", { hidden: true }), null);
     await act(async () => { slot.getByRole("button", { name: "账号" }).click(); });
     assert.equal(slot.queryByText("整池节奏"), null);
-    assert.equal(slot.queryByRole("note", { name: /^临期使用建议：/u }), null);
+    assert.equal(slot.queryByRole("note", { name: /^周额度建议：快用临期额度/u }), null);
     assert.equal(slot.queryByRole("note", { name: /^最近重置账号/u }), null);
     assert.equal(slot.inspection.rpcCalls.length, 1);
     slot.lifecycle.unmount();
   }
 });
 
-test("临期机会在完整面板与小窗突出显示，不把临期余量当作整池宽裕", async t => {
+test("7分钟后重置且剩39%时，完整面板与小窗以快用临期额度为主建议", async t => {
   installTestPluginRuntime(); dom.window.localStorage.clear();
   dom.window.localStorage.setItem("account-limits.view", "pool");
   const now = Date.parse("2026-10-26T00:00:00Z");
@@ -1028,9 +1027,9 @@ test("临期机会在完整面板与小窗突出显示，不把临期余量当�
   const app = await loadPluginApp(() => import("./app.js"));
   const footer = app.experimentalSidebarFooterItems[0]!;
   if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
-  const accounts = [34, 43, 43, 43, 43, 45].map((remaining, index) => ({ key: `example-${index}`, label: `Example ${index + 1}`, weight: 1,
+  const accounts = [39, 43, 43, 43, 43, 45].map((remaining, index) => ({ key: `example-${index}`, label: `Example ${index + 1}`, weight: 1,
     updatedAt: at(0), usage: { status: "ok" as const, planLabel: null, windows: [
-      { label: "Weekly limit", usedPercent: 100 - remaining, resetsAt: at(index === 0 ? 1 : 84) },
+      { label: "Weekly limit", usedPercent: 100 - remaining, resetsAt: at(index === 0 ? 7 / 60 : 84) },
       { label: "5-hour limit", usedPercent: 0, resetsAt: at(2) },
     ] } }));
   const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", source: "cliproxy", displayName: "proxy", status: "connected", error: null,
@@ -1044,22 +1043,25 @@ test("临期机会在完整面板与小窗突出显示，不把临期余量当�
   const check = () => {
     for (const slot of [full, compact]) {
       const view = within(slot.container);
-      const opportunity = view.getByRole("note", { name: /^临期使用建议：/u });
-      assert.equal(opportunity.textContent, "临期额度可多用");
-      assert.match(opportunity.title, /Example 1.*占当前池 5.7 个百分点.*整池节奏仍为正常用/u);
-      const poolPace = view.getByRole("note", { name: /^周额度建议：正常用/u });
-      assert.equal(opportunity.closest("details")!.nextElementSibling, poolPace.closest("details"));
-      assert.match(view.getByRole("note", { name: /^最近重置账号/u }).textContent!, /周剩 34%.*建议先用/u);
+      const opportunity = view.getByRole("note", { name: /^周额度建议：快用临期额度/u });
+      assert.equal(opportunity.textContent, "使用建议快用临期额度");
+      assert.match(opportunity.title, /Example 1.*占当前池 6.5 个百分点.*整池长期节奏为正常用/u);
+      assert.equal(view.queryByRole("note", { name: /^周额度建议：正常用/u }), null);
+      assert.match(view.getByRole("note", { name: /^最近重置账号/u }).textContent!, /7分钟.*周剩 39%.*建议先用/u);
       assert.equal(opportunity.closest(".limits-meter")!.getAttribute("data-pace"), "normal");
+      assert.equal(opportunity.closest(".limits-meter")!.getAttribute("data-tone"), "generous");
     }
+    const card = within(compact.container).getByRole("button", { name: "Claude" });
+    assert.match(card.title, /快用临期额度/u);
+    assert.equal(card.getAttribute("data-tone"), "generous");
   };
   check();
   await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
   check();
   assert.equal(full.inspection.rpcCalls.length + compact.inspection.rpcCalls.length, 1);
-  await act(async () => { t.mock.timers.tick(61 * 60_000); });
+  await act(async () => { t.mock.timers.tick(8 * 60_000); });
   for (const slot of [full, compact]) {
-    assert.equal(within(slot.container).queryByRole("note", { name: /^临期使用建议：/u }), null);
+    assert.equal(within(slot.container).queryByRole("note", { name: /^周额度建议：快用临期额度/u }), null);
     assert.match(within(slot.container).getByRole("note", { name: /^最近重置账号/u }).textContent!, /待确认/u);
   }
   assert.equal(full.inspection.rpcCalls.length + compact.inspection.rpcCalls.length, 1);
@@ -1090,7 +1092,7 @@ test("最近重置摘要显示同批账号状态，越过重置时等待确认�
   assert.match(next().getAttribute("title")!, /有余量但受限：周剩 42%，5h 暂受限/u);
   assert.match(next().getAttribute("title")!, /少量：周剩 <0.1%/u);
   assert.equal(slot.queryByText("建议先用"), null);
-  const opportunity = slot.getByRole("note", { name: /^临期使用建议：/u });
+  const opportunity = slot.getByRole("note", { name: /^周额度建议：快用临期额度/u });
   assert.match(opportunity.title, /晚重置/u);
   assert.doesNotMatch(opportunity.title, /有余量但受限|零余量|少量/u);
   const bar = slot.getByRole("progressbar", { name: "7d 剩余额度" });
@@ -1121,7 +1123,7 @@ test("部分重置时间未知时只称最近已知，旧测量与全部未知�
   await slot.findByText("Codex");
   const next = () => slot.getByRole("note", { name: /^最近已知重置账号/u });
   assert.match(next().textContent!, /最近已知重置.*周剩 42%.*建议先用/u);
-  assert.equal(slot.queryByRole("note", { name: /^临期使用建议：/u }), null);
+  assert.equal(slot.queryByRole("note", { name: /^周额度建议：快用临期额度/u }), null);
   assert.match(next().getAttribute("title")!, /另有 1 个账号的周窗口或重置时间未知/u);
   await act(async () => { t.mock.timers.tick(61 * 60_000); });
   assert.match(next().textContent!, /余量待确认/u);
@@ -1197,7 +1199,7 @@ test("Ultra and Pro stay separate in full pools, compact cards, reset batches an
   assert.equal(ultra.getByRole("progressbar", { name: "Gem 7d 剩余额度" }).getAttribute("aria-valuenow"), "10");
   assert.equal(pro.getByRole("progressbar", { name: "Gem 7d 剩余额度" }).getAttribute("aria-valuenow"), "80");
   assert.ok(ultra.getByRole("note", { name: /^周额度建议：节约用/u }));
-  assert.ok(pro.getByRole("note", { name: /^周额度建议：可多用/u }));
+  assert.ok(pro.getByRole("note", { name: /^周额度建议：快用临期额度/u }));
   assert.match(ultra.getAllByRole("note", { name: /^最近重置账号/u })[0]!.getAttribute("title")!, /Ultra one.*Ultra two/u);
   assert.doesNotMatch(ultra.getAllByRole("note", { name: /^最近重置账号/u })[0]!.getAttribute("title")!, /Pro one/u);
   const footer = app.experimentalSidebarFooterItems[0]!;

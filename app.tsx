@@ -4,7 +4,7 @@ import { definePluginApp, experimental_Icon as BbIcon, useBbNavigate } from "@ge
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
 import { aggregateCliproxyPool, groupAccountPools, groupProviderAccountTypes, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
 import { AntigravityIcon, GrokIcon, ProviderBrandIcon, providerBrand } from "./provider-icons.js";
-import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, orderAccountsByReset, quotaTone, formatQuotaPercent, quotaWindowDisplayLabel, quotaWindowPeriod, type QuotaUiStore } from "./quota-presentation.js";
+import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, orderAccountsByReset, quotaTone, weeklyPaceAdvice, formatQuotaPercent, quotaWindowDisplayLabel, quotaWindowPeriod, type QuotaUiStore } from "./quota-presentation.js";
 import { useQuotaData, useQuotaPreference, useQuotaChoicePreference } from "./quota-ui.js";
 import { panelStyles } from "./panel-styles.js";
 import { buildPoolRecovery, type PoolRecovery } from "./pool-recovery.js";
@@ -176,9 +176,7 @@ function WindowMeter({ window, now, mode }: { window: MeterWindow; now: number; 
   const percent = mode === "used" ? 100 - remaining : remaining;
   const reset = compactReset(window.resetsAt, now);
   const depleted = remaining <= 10;
-  const expiringAdvice = window.pooled && window.pace && window.pace.expiringAccounts.length > 0
-    ? `优先使用 ${window.pace.expiringAccounts.join("、")}：24 小时内重置，其周余量合计占当前池 ${recoveryNumber(window.pace.expiringRemainingPercent)} 个百分点。需优先使用这些账号，整池节奏仍为${window.pace.label}。`
-    : null;
+  const advice = window.pace ? window.pooled ? weeklyPaceAdvice(window.pace) : { ...window.pace, prioritize: false } : null;
   return <li className="limits-meter" data-pace={window.pace?.level} data-tone={quotaTone(window.usedPercent, window.pace)} data-depleted={depleted || undefined} data-warning={remaining <= 20 && !depleted || undefined}>
     <div className="limits-meter-heading">
       <div className="limits-meter-title">
@@ -189,13 +187,9 @@ function WindowMeter({ window, now, mode }: { window: MeterWindow; now: number; 
     <div className={`limits-meter-track${window.recovery && window.recovery.usedPercent > 0 ? " limits-meter-track--recovery" : ""}`} role="progressbar" aria-label={`${label} ${mode === "used" ? "已用" : "剩余"}额度`} aria-valuemin={0} aria-valuemax={100} aria-valuenow={percent} title={`${label} · ${reset}`}>
       {window.recovery && window.recovery.usedPercent > 0 ? <RecoverySegments recovery={window.recovery} mode={mode} now={now} /> : <div className="limits-meter-fill" style={{ width: `${percent}%` }} />}
     </div>
-    {window.pace && <div className="limits-meter-advice">
-      {expiringAdvice && <Explanation text={expiringAdvice}><span className="limits-pace" data-level="generous" role="note"
-        aria-label={`临期使用建议：临期额度可多用。${expiringAdvice}`} title={expiringAdvice}>
-        <span className="limits-pace-scope">临期额度</span><span>可多用</span>
-      </span></Explanation>}
-      <Explanation text={window.pace.reason}><span className="limits-pace" data-level={window.pace.level} role="note"
-          aria-label={`周额度建议：${window.pace.label}。${window.pooled ? "整池节奏。" : ""}${window.pace.reason}`} title={window.pace.reason}>{window.pooled ? <><span className="limits-pace-scope">整池节奏</span><span>{window.pace.label}</span></> : window.pace.label}</span></Explanation>
+    {advice && <div className="limits-meter-advice">
+      <Explanation text={advice.reason}><span className="limits-pace" data-level={advice.level} role="note"
+          aria-label={`周额度建议：${advice.label}。${window.pooled && !advice.prioritize ? "整池节奏。" : ""}${advice.reason}`} title={advice.reason}>{window.pooled ? <><span className="limits-pace-scope">{advice.prioritize ? "使用建议" : "整池节奏"}</span><span>{advice.label}</span></> : advice.label}</span></Explanation>
     </div>}
     {window.nextReset
       ? <><NextReset summary={window.nextReset} now={now} />{window.detail && <p className="limits-reset limits-pool-coverage">{window.detail}</p>}</>
@@ -596,7 +590,10 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
           tone: quotaTone(metric.usedPercent, metric.pace),
         }));
         const summary = metrics.map(metric => `${metrics.length === 1 ? metric.fullLabel : metric.label}${metric.percent === null ? " —" : `${mode === "used" ? "已用" : "剩余"} ${metric.percent}%${metric.partial ? "*" : ""}`}`).join("，");
-        const detail = metrics.map(metric => `${metric.fullLabel}${metric.pace ? ` · ${metric.pace.label}` : ""} · ${metric.detail}`).join("；");
+        const detail = metrics.map(metric => {
+          const advice = metric.pace ? weeklyPaceAdvice(metric.pace) : null;
+          return `${metric.fullLabel}${advice ? ` · ${advice.label}${advice.prioritize ? `（${advice.reason}）` : ""}` : ""} · ${metric.detail}`;
+        }).join("；");
         return <button type="button" key={entry.key} className="limits-compact-service" data-tone={metrics.length === 1 ? metrics[0]!.tone : "normal"} aria-pressed={entry.key === active?.key}
           aria-label={entry.name}
           title={`${entry.machine.displayName} · ${sourceNames[entry.machine.source ?? "cliproxy"]}${summary ? ` · ${summary}（池汇总，各项分别统计） · ${detail}` : ""}`}

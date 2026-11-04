@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowPeriod, quotaAlerts, quotaTone, orderAccountsByReset } from "./quota-presentation.js";
+import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowPeriod, quotaAlerts, quotaTone, weeklyPaceAdvice, orderAccountsByReset } from "./quota-presentation.js";
 import type { AccountLimitsPanelSnapshot, QuotaAccount } from "./contract.js";
 import type { WeeklyPace } from "./weekly-pace.js";
 
@@ -451,6 +451,26 @@ const fakePace = (level: WeeklyPace["level"]): WeeklyPace => ({
   reason: "mock",
   expiringAccounts: [],
   expiringRemainingPercent: 0,
+});
+
+test("当前使用建议优先消耗临期额度，保留长期评级及耗尽、受限、未知状态", () => {
+  for (const level of ["normal", "conserve", "generous"] as const) {
+    const pace = { ...fakePace(level), expiringAccounts: ["Example"], expiringRemainingPercent: 6.5 };
+    const before = structuredClone(pace);
+    const advice = weeklyPaceAdvice(pace);
+    assert.equal(advice.label, "快用临期额度");
+    assert.equal(advice.prioritize, true);
+    assert.match(advice.reason, /Example.*6.5 个百分点.*整池长期节奏/u);
+    assert.deepEqual(pace, before);
+    assert.equal(quotaTone(73.5, pace), "generous");
+    assert.equal(quotaTone(95, pace), "critical");
+  }
+  for (const level of ["blocked", "exhausted", "unknown"] as const) {
+    const advice = weeklyPaceAdvice({ ...fakePace(level), expiringAccounts: ["Example"], expiringRemainingPercent: 6.5 });
+    assert.equal(advice.level, level);
+    assert.equal(advice.prioritize, false);
+  }
+  assert.equal(weeklyPaceAdvice(fakePace("normal")).label, "normal");
 });
 
 test("quotaTone evaluates priority boundaries across thresholds and pace signals", () => {
