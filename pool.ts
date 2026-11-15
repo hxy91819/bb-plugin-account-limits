@@ -89,12 +89,19 @@ export interface AccountPoolType {
   note?: string;
 }
 
+/** Identity fallbacks (including email/account names) are not verified subscription metadata. */
+export function verifiedAccountPlan(account: QuotaAccount): string | null {
+  const usage = account.usage.status === "ok" ? account.usage : account.lastKnown?.usage;
+  const raw = usage?.planLabel?.replace(/ \(cached\)$/iu, "").trim().replace(/\s+/gu, " ");
+  return raw && raw.toLowerCase() !== account.label.trim().replace(/\s+/gu, " ").toLowerCase()
+    && raw !== account.key && !raw.includes("@") ? raw : null;
+}
+
 /** Weekly ratios only. Team's reported multiplier is an explicitly estimated ratio. */
 function claudeWeeklyCapacity(account: QuotaAccount): { weight: number; estimated: boolean } | null {
-  if (account.usage.status !== "ok") return null;
-  const rawPlan = account.usage.planLabel?.replace(/ \(cached\)$/iu, "").trim().replace(/\s+/gu, " ");
+  const rawPlan = verifiedAccountPlan(account);
   const plan = rawPlan?.toLowerCase();
-  if (!plan || plan === account.label.trim().toLowerCase() || rawPlan === account.key || plan.includes("@")) return null;
+  if (!plan) return null;
   const official: Record<string, number> = { pro: 1, "max 5x": 5, ultra: 10, "max 20x": 10 };
   if (Object.hasOwn(official, plan)) return { weight: official[plan]!, estimated: false };
   const team = /^team ([1-9]\d*)x(?: · [\w-]+)?$/u.exec(plan);
@@ -125,9 +132,7 @@ export interface PoolAccount extends QuotaAccount {
 export function groupAccountTypes(accounts: readonly QuotaAccount[]): AccountPoolType[] {
   const types = new Map<string, { id: string; label: string | null; accounts: QuotaAccount[] }>();
   for (const account of accounts) {
-    const raw = account.usage.status === "ok" ? account.usage.planLabel?.replace(/ \(cached\)$/iu, "").trim().replace(/\s+/gu, " ") : null;
-    const label = raw && raw.toLowerCase() !== account.label.trim().replace(/\s+/gu, " ").toLowerCase()
-      && raw !== account.key && !raw.includes("@") ? raw : null;
+    const label = verifiedAccountPlan(account);
     const id = label ? `type-${encodeURIComponent(label.toLowerCase())}` : "default";
     let group = types.get(id);
     if (!group) { group = { id, label, accounts: [] }; types.set(id, group); }
@@ -155,8 +160,8 @@ export function groupAccountPools(providerId: string, accounts: readonly QuotaAc
     const regular: QuotaAccount[] = [];
     const withoutWeekly: QuotaAccount[] = [];
     for (const account of type.accounts) {
-      const usage = account.usage;
-      const missingWeekly = claude && usage.status === "ok" && usage.windows.length > 0
+      const usage = account.usage.status === "ok" ? account.usage : account.lastKnown?.usage;
+      const missingWeekly = claude && usage?.status === "ok" && usage.windows.length > 0
         && !usage.windows.some(window => normalizeCliproxyWindow(window.label).id === "7d");
       (missingWeekly ? withoutWeekly : regular).push(account);
     }

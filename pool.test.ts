@@ -120,3 +120,22 @@ test("unknown identity labels and failures stay separate from known tiers; Claud
   assert.deepEqual(data, raw);
   assert.equal(new Set(groups.map(g => g.id)).size, 4);
 });
+
+test("failed Claude accounts retain historical weekly-availability groups without using historical quota", () => {
+  const full = { ...account("full", 1, [{ label: "Weekly limit", usedPercent: 40, resetsAt: null }]),
+    usage: { status: "ok" as const, planLabel: "Ultra", windows: [{ label: "Weekly limit", usedPercent: 40, resetsAt: null }] } };
+  const limited: QuotaAccount = { key: "limited", label: "Limited", weight: 1, usage: { status: "error", message: "unavailable" },
+    lastKnown: { updatedAt: "2026-11-10T00:00:00Z", usage: { status: "ok", planLabel: "Ultra",
+      windows: [{ label: "5-hour limit", usedPercent: 10, resetsAt: null }] } } };
+  const groups = groupAccountPools("cliproxy-claude", [full, limited]);
+  assert.deepEqual(groups.map(group => [group.kind, group.accounts.map(account => account.key)]), [
+    ["default", ["full"]], ["without-weekly", ["limited"]],
+  ]);
+  const current = aggregateCliproxyPool(groups[0]!.accounts);
+  assert.equal(current.status, "ok");
+  if (current.status === "ok") {
+    assert.equal(current.totalAccounts, 1);
+    assert.equal(current.windows[0]?.usedPercent, 40);
+  }
+  assert.equal(aggregateCliproxyPool(groups[1]!.accounts).status, "error");
+});

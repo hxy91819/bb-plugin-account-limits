@@ -19,8 +19,20 @@ Object.assign(globalThis, {
 });
 Object.defineProperty(globalThis, "navigator", { configurable: true, value: dom.window.navigator });
 
+// Existing fixtures cover an upgraded browser with account details previously selected.
+function resetLegacyPreferences() {
+  dom.window.localStorage.clear();
+  dom.window.localStorage.setItem("account-limits.view", "accounts");
+}
+
+function setAccountDetails(root: Pick<ReturnType<typeof within>, "getByRole">, show: boolean) {
+  const scope = "container" in root ? within(root.container as HTMLElement) : root;
+  const checkbox = scope.getByRole("checkbox", { name: "显示账号详情" }) as HTMLInputElement;
+  if (checkbox.checked !== show) checkbox.click();
+}
+
 test("Claude full and compact views share one estimated weekly pool and keep account detail", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.view", "pool");
   const app = await loadPluginApp(() => import("./app.js"));
   const plans = ["Pro", "Max 5x", "Ultra", "Ultra", "Ultra", "Ultra", "Team 5x · team_tier_1", "Team 5x · team_tier_2"];
@@ -36,9 +48,9 @@ test("Claude full and compact views share one estimated weekly pool and keep acc
     }],
   }] };
   const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-  t.after(() => { full.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { full.lifecycle.unmount(); resetLegacyPreferences(); });
   await full.findByText("Claude");
-  await act(async () => { full.getByRole("button", { name: "池" }).click(); });
+  await act(async () => { setAccountDetails(full, false); });
   const meter = full.getByRole("progressbar", { name: "7d 剩余额度" });
   assert.ok(Math.abs(Number(meter.getAttribute("aria-valuenow")) - 1900 / 56) < 0.01);
   assert.ok(full.getByText(/Team 按账号报告倍率 ×5 估算/u));
@@ -50,7 +62,7 @@ test("Claude full and compact views share one estimated weekly pool and keep acc
   assert.equal(compact.container.querySelectorAll(".limits-compact-service").length, 1);
   assert.equal(card.querySelector(".limits-compact-service-value")?.textContent, "33.9%");
   assert.ok(within(compact.container).getByText(/Team 按账号报告倍率 ×5 估算/u));
-  await act(async () => { compact.getByRole("button", { name: "小窗：账号" }).click(); });
+  await act(async () => { setAccountDetails(compact, true); });
   assert.equal(compact.container.querySelectorAll(".limits-compact-account").length, 8);
   assert.equal(compact.container.querySelectorAll('[aria-label="5h 短期限制"]').length, 8);
   assert.equal(snapshot.machines[0]!.providers[0]!.accounts[0]!.weight, 1);
@@ -58,7 +70,7 @@ test("Claude full and compact views share one estimated weekly pool and keep acc
 
 test("sources fold independently, persist across mounts and absent proxies add no empty section", async t => {
   installTestPluginRuntime();
-  dom.window.localStorage.clear();
+  resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const snapshot: AccountLimitsPanelSnapshot = { machines: [
     { id: "proxy", source: "cliproxy", displayName: "proxy", status: "connected", providers: [], error: null },
@@ -66,7 +78,7 @@ test("sources fold independently, persist across mounts and absent proxies add n
   ] };
   const render = () => renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
   let slot = render();
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   const summary = await slot.findByLabelText("CLI Proxy 来源");
   assert.equal(summary.parentElement!.hasAttribute("open"), true);
   await act(async () => { summary.click(); await new Promise(resolve => setTimeout(resolve, 10)); });
@@ -88,7 +100,7 @@ test("周额度建议覆盖两种来源和账号/池视图，模型上限与缺�
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-15T00:00:00Z") });
   const app = await loadPluginApp(() => import("./app.js"));
   for (const source of ["cliproxy", "account-pool"] as const) {
-    dom.window.localStorage.clear();
+    resetLegacyPreferences();
     const at = (hours: number) => new Date(Date.now() + hours * 3_600_000).toISOString();
     const make = (key: string, remaining: number | null, hours: number) => ({ key, label: key, weight: 1, updatedAt: at(0),
       usage: { status: "ok" as const, planLabel: null, windows: [
@@ -106,7 +118,7 @@ test("周额度建议覆盖两种来源和账号/池视图，模型上限与缺�
           ] } }],
     }] };
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-    t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+    t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
     await slot.findByText("Claude");
     for (const [name, advice] of [["宽裕", "可多用"], ["正常", "正常用"], ["紧张", "节约用"]]) {
       const account = within(slot.getByRole("region", { name: `${name} 的额度` }));
@@ -115,7 +127,7 @@ test("周额度建议覆盖两种来源和账号/池视图，模型上限与缺�
     }
     assert.equal(within(slot.getByRole("region", { name: "缺总周 的额度" })).queryByRole("note"), null);
     assert.ok(within(slot.getByRole("region", { name: "旧版账号 的额度" })).getByRole("note", { name: /^周额度建议：可多用/u }));
-    await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
+    await act(async () => { setAccountDetails(slot, false); });
     const pool = within(slot.getByRole("region", { name: "含全模型周额度 的池额度" }));
     assert.ok(pool.getByRole("note", { name: /^周额度建议：快用临期额度/u }));
     assert.equal(within(slot.getByRole("region", { name: "未报告全模型周额度 的池额度" })).queryByRole("note"), null);
@@ -133,7 +145,7 @@ test("两种来源的池恢复分段以悬停提示展示，切换模式或跨�
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-15T00:00:00Z") });
   const app = await loadPluginApp(() => import("./app.js"));
   for (const source of ["cliproxy", "account-pool"] as const) {
-    dom.window.localStorage.clear();
+    resetLegacyPreferences();
     const at = (ms: number) => new Date(Date.now() + ms).toISOString();
     const make = (key: string, weight: number, weekly: number | null, reset: string) => ({ key, label: key, weight,
       usage: { status: "ok" as const, planLabel: null, windows: [
@@ -148,10 +160,10 @@ test("两种来源的池恢复分段以悬停提示展示，切换模式或跨�
         ] }],
     }] };
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-    t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+    t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
     await slot.findByText("Claude");
     assert.equal(slot.queryByRole("button", { name: /恢复计划/u }), null);
-    await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
+    await act(async () => { setAccountDetails(slot, false); });
     const group = within(slot.getByRole("region", { name: "含全模型周额度 的池额度" }));
     const weekly = () => group.getByRole("progressbar", { name: /^(7d) (剩余|已用)额度$/u });
     assert.equal(weekly().getAttribute("aria-valuenow"), "20");
@@ -166,7 +178,7 @@ test("两种来源的池恢复分段以悬停提示展示，切换模式或跨�
     assert.equal(weekly().getAttribute("aria-valuenow"), "80");
     assert.ok(group.getByTitle("已到重置时间，待刷新 · 66.7 个百分点"));
     assert.ok(group.getByTitle(/预计恢复 13.3 个百分点 · 预计剩余 33.3%/u));
-    await act(async () => { slot.getByRole("button", { name: "账号" }).click(); });
+    await act(async () => { setAccountDetails(slot, true); });
     const account = within(slot.getByRole("region", { name: "later 的额度" }));
     assert.ok(account.getByText("还剩 2 小时 59 分钟重置"));
     assert.equal(slot.inspection.rpcCalls.length, 1);
@@ -176,7 +188,7 @@ test("两种来源的池恢复分段以悬停提示展示，切换模式或跨�
 
 test("概览统计账号记录、去掉重复身份标签，并保留多个模型各自的上限与重置时间", async t => {
   installTestPluginRuntime();
-  dom.window.localStorage.clear();
+  resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.hide-failures", "false");
   t.mock.timers.enable({ apis: ["Date"], now: new Date("2026-10-15T00:00:00Z") });
   const app = await loadPluginApp(() => import("./app.js"));
@@ -195,7 +207,7 @@ test("概览统计账号记录、去掉重复身份标签，并保留多个模�
         windows: [{ accountLabel: "旧版账号", label: "Weekly limit", usedPercent: 25, resetsAt: null }] } },
     ] }] };
   const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   await slot.findByText("Claude");
   assert.ok(slot.getByRole("heading", { level: 1, name: "账户额度" }));
   const overview = within(slot.getByLabelText("额度记录概览"));
@@ -203,7 +215,7 @@ test("概览统计账号记录、去掉重复身份标签，并保留多个模�
   assert.ok(overview.getByText("4"));
   const work = within(slot.getByRole("region", { name: "工作账号 的额度" }));
   assert.equal(work.getAllByText("工作账号").length, 1);
-  assert.ok(slot.getByText("Team Premium"));
+  assert.ok(slot.getAllByText("Team Premium").length > 0);
   assert.ok(slot.getByText("账号登录已过期。"));
   const caps = within(work.getByRole("group", { name: "模型周上限" }));
   assert.equal(caps.getByRole("progressbar", { name: "Weekly scoped limit 剩余额度" }).getAttribute("aria-valuenow"), "30");
@@ -216,7 +228,7 @@ test("概览统计账号记录、去掉重复身份标签，并保留多个模�
 
 test("初次读取有加载状态，空数据可刷新，刷新失败保留页面并恢复操作", async t => {
   installTestPluginRuntime();
-  dom.window.localStorage.clear();
+  resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   let resolveInitial!: (snapshot: AccountLimitsPanelSnapshot) => void;
   const initial = new Promise<AccountLimitsPanelSnapshot>(resolve => { resolveInitial = resolve; });
@@ -224,7 +236,7 @@ test("初次读取有加载状态，空数据可刷新，刷新失败保留页�
     if ((input as { force?: boolean }).force) throw new Error("暂时无法刷新");
     return initial;
   } } });
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   assert.ok(slot.getByRole("status").textContent?.includes("正在读取账户额度"));
   assert.equal((slot.getByRole("button", { name: "刷新全部" }) as HTMLButtonElement).disabled, true);
   await act(async () => { resolveInitial({ machines: [] }); });
@@ -240,7 +252,7 @@ test("Claude 将模型周上限置于总周额度之下，两种来源及账号�
   installTestPluginRuntime();
   const app = await loadPluginApp(() => import("./app.js"));
   for (const source of ["cliproxy", "account-pool"] as const) {
-    dom.window.localStorage.clear();
+    resetLegacyPreferences();
     const windows = [
       { label: "5-hour limit", usedPercent: 0, resetsAt: null },
       { label: "Weekly limit", usedPercent: 100, resetsAt: "2026-10-20T00:00:00Z" },
@@ -257,7 +269,7 @@ test("Claude 将模型周上限置于总周额度之下，两种来源及账号�
       }],
     }] };
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-    t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+    t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
     await slot.findByText("Claude");
     const regular = within(slot.getByRole("region", { name: "总周已耗尽 的额度" }));
     const weekly = within(regular.getByRole("group", { name: "周额度" }));
@@ -277,7 +289,7 @@ test("Claude 将模型周上限置于总周额度之下，两种来源及账号�
     await act(async () => { slot.getByRole("button", { name: "已用（Used）" }).click(); });
     assert.equal(scoped.getByRole("progressbar").getAttribute("aria-valuenow"), "27");
     assert.equal(weekly.getByRole("progressbar", { name: "Weekly limit 已用额度" }).getAttribute("aria-valuenow"), "100");
-    await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
+    await act(async () => { setAccountDetails(slot, false); });
     const regularPool = within(slot.getByRole("region", { name: "含全模型周额度 的池额度" }));
     const poolWeekly = within(regularPool.getByRole("group", { name: "周额度" }));
     assert.equal(slot.getAllByText(/不可相加/).length, 1);
@@ -289,7 +301,7 @@ test("Claude 将模型周上限置于总周额度之下，两种来源及账号�
 
 test("Antigravity 面板显示实际套餐，周额度耗尽时不显示停用的 5h 余量", async t => {
   installTestPluginRuntime();
-  dom.window.localStorage.clear();
+  resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const accounts = ["Ultra", "Pro"].map(tier => {
     const usage = normalizeAntigravityUsage({ groups: [
@@ -309,9 +321,9 @@ test("Antigravity 面板显示实际套餐，周额度耗尽时不显示停用�
       usage: { status: "ok", planLabel: null, windows: [] }, accounts }],
   }] };
   const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
-  await slot.findByText("Google AI Ultra");
-  await slot.findByText("Google AI Pro");
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
+  await slot.findAllByText("Google AI Ultra");
+  await slot.findAllByText("Google AI Pro");
   const pro = within(slot.getByRole("region", { name: "Pro account 的额度" }));
   assert.equal(pro.queryByRole("progressbar", { name: "Claude and GPT models: 5-hour limit 剩余额度" }), null);
   assert.equal(pro.getByRole("progressbar", { name: "Claude and GPT models: Weekly limit 剩余额度" }).getAttribute("aria-valuenow"), "0");
@@ -323,7 +335,7 @@ test("Claude 池视图把没有全模型周额度的账号单独合并，两种�
   installTestPluginRuntime();
   const app = await loadPluginApp(() => import("./app.js"));
   for (const source of ["cliproxy", "account-pool"] as const) {
-    dom.window.localStorage.clear();
+    resetLegacyPreferences();
     const account = (key: string, percent: number, weekly: boolean, weight: number) => ({
       key, label: key, weight, usage: { status: "ok" as const, planLabel: null, windows: [
         { label: "5-hour limit", usedPercent: percent, resetsAt: null },
@@ -341,9 +353,9 @@ test("Claude 池视图把没有全模型周额度的账号单独合并，两种�
       }],
     }] };
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-    t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+    t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
     await slot.findByText("Claude");
-    await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
+    await act(async () => { setAccountDetails(slot, false); });
     const regular = within(slot.getByRole("region", { name: "含全模型周额度 的池额度" }));
     const withoutWeekly = within(slot.getByRole("region", { name: "未报告全模型周额度 的池额度" }));
     assert.equal(regular.getByRole("progressbar", { name: "5h 剩余额度" }).getAttribute("aria-valuenow"), "60");
@@ -353,7 +365,7 @@ test("Claude 池视图把没有全模型周额度的账号单独合并，两种�
     assert.equal(withoutWeekly.getByRole("progressbar", { name: "scoped 剩余额度" }).getAttribute("aria-valuenow"), "90");
     assert.ok(regular.getAllByText(/2 个账号汇总/).length > 0);
     assert.ok(withoutWeekly.getAllByText(/2 个账号汇总/).length > 0);
-    await act(async () => { slot.getByRole("button", { name: "账号" }).click(); });
+    await act(async () => { setAccountDetails(slot, true); });
     assert.ok(slot.getByRole("region", { name: "未报周额度 A 的额度" }));
     slot.lifecycle.unmount();
   }
@@ -418,7 +430,7 @@ test("账户额度页面注册为导航面板并显示独立 Cliproxy 数据", a
   const usedMeter = slot.getByRole("progressbar", { name: "Weekly limit 已用额度" });
   assert.equal(usedMeter.getAttribute("aria-valuenow"), "25");
   assert.equal((usedMeter.firstElementChild as HTMLElement).style.width, "25%");
-  assert.ok(slot.getByText("25%"));
+  assert.ok(slot.getAllByText("25%").length > 0);
   assert.equal(slot.inspection.rpcCalls.length, 2);
   slot.lifecycle.unmount();
 
@@ -433,7 +445,7 @@ test("账户额度页面注册为导航面板并显示独立 Cliproxy 数据", a
   await remaining.findByText("Claude");
   assert.equal(remaining.getByRole("button", { name: "剩余" }).getAttribute("aria-pressed"), "true");
   remaining.lifecycle.unmount();
-  dom.window.localStorage.clear();
+  resetLegacyPreferences();
 });
 
 test("池视图把同供应商账号额度聚合成一池并记住选择", async () => {
@@ -463,7 +475,7 @@ test("池视图把同供应商账号额度聚合成一池并记住选择", async
   const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
   await slot.findByText("Claude");
   assert.ok(slot.getByRole("region", { name: "Claude 工作账号 的额度" }));
-  await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
+  await act(async () => { setAccountDetails(slot, false); });
   // (3×20 + 1×60) / 4 = 30，剩余模式显示 70%；覆盖 2/2。
   const meter = slot.getByRole("progressbar", { name: "7d 剩余额度" });
   assert.equal(meter.getAttribute("aria-valuenow"), "70");
@@ -473,10 +485,10 @@ test("池视图把同供应商账号额度聚合成一池并记住选择", async
 
   const restored = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
   await restored.findByText("Claude");
-  assert.equal(restored.getByRole("button", { name: "池" }).getAttribute("aria-pressed"), "true");
+  assert.equal((restored.getByRole("checkbox", { name: "显示账号详情" }) as HTMLInputElement).checked, false);
   assert.ok(restored.getByRole("progressbar", { name: "7d 剩余额度" }));
   restored.lifecycle.unmount();
-  dom.window.localStorage.clear();
+  resetLegacyPreferences();
 });
 
 test("各账号额度直接显示重置倒计时，并随时间更新而不重新查询", async t => {
@@ -520,7 +532,7 @@ test("各账号额度直接显示重置倒计时，并随时间更新而不重�
 });
 
 test("统一页面同时显示两种来源，共用池与账号切换，刷新 Account Pooler 保留 Cliproxy 并移除旧账号", async t => {
-  dom.window.localStorage.clear();
+  resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.hide-failures", "false");
   installTestPluginRuntime();
   const app = await loadPluginApp(() => import("./app.js"));
@@ -545,7 +557,7 @@ test("统一页面同时显示两种来源，共用池与账号切换，刷新 A
     if (input.source === "account-pool") return { machines: [{ ...pool, providers: [provider("account-pool:codex", [account("Pool A", 80)])] }] };
     return { machines: [cliproxy, pool] };
   } } });
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   await slot.findByRole("region", { name: "Account Pooler 的账户额度" });
   const poolSection = () => within(slot.getByRole("region", { name: "Account Pooler 的账户额度" }));
   const clipSection = () => within(slot.getByRole("region", { name: "本机 的账户额度" }));
@@ -553,7 +565,7 @@ test("统一页面同时显示两种来源，共用池与账号切换，刷新 A
   assert.ok(poolSection().getByRole("region", { name: "Pool B 的额度" }));
   assert.ok(poolSection().getByText("账号登录已过期。"));
   assert.ok(clipSection().getByText("Cliproxy"));
-  await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
+  await act(async () => { setAccountDetails(slot, false); });
   assert.equal(poolSection().getAllByRole("progressbar")[0]!.getAttribute("aria-valuenow"), "60");
   assert.equal(clipSection().getByRole("progressbar").getAttribute("aria-valuenow"), "80");
   assert.ok(poolSection().getByText(/2 个账号汇总/));
@@ -571,13 +583,13 @@ test("统一页面同时显示两种来源，共用池与账号切换，刷新 A
     { method: "readAccountLimits", input: {} },
     { method: "readAccountLimits", input: { source: "account-pool", providerIds: ["account-pool:codex"], force: true } },
   ]);
-  await act(async () => { slot.getByRole("button", { name: "账号" }).click(); });
+  await act(async () => { setAccountDetails(slot, true); });
   assert.ok(poolSection().getByRole("region", { name: "Pool A 的额度" }));
   assert.equal(poolSection().queryByRole("region", { name: "Pool B 的额度" }), null);
 });
 
 test("Gemini 缓存窗口在账号和池视图按周主、5h 次排列，并保留模型分组", async t => {
-  dom.window.localStorage.clear();
+  resetLegacyPreferences();
   installTestPluginRuntime();
   const app = await loadPluginApp(() => import("./app.js"));
   const windows = [
@@ -594,13 +606,13 @@ test("Gemini 缓存窗口在账号和池视图按周主、5h 次排列，并保�
     }],
   }] };
   const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   await slot.findByText("Gemini 账号");
-  assert.deepEqual(slot.getAllByRole("progressbar").map(meter => meter.getAttribute("aria-label")), [
+  assert.deepEqual(within(slot.getByRole("region", { name: "Gemini 账号 的额度" })).getAllByRole("progressbar").map(meter => meter.getAttribute("aria-label")), [
     "Gemini Models: Weekly limit 剩余额度", "Gemini Models: 5-hour limit 剩余额度",
     "Claude and GPT models: Weekly limit 剩余额度", "Claude and GPT models: 5-hour limit 剩余额度",
   ]);
-  await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
+  await act(async () => { setAccountDetails(slot, false); });
   assert.deepEqual(slot.getAllByRole("progressbar").map(meter => meter.getAttribute("aria-label")), [
     "Gem 7d 剩余额度", "Gem 5h 剩余额度", "C/G 7d 剩余额度", "C/G 5h 剩余额度",
   ]);
@@ -609,7 +621,7 @@ test("Gemini 缓存窗口在账号和池视图按周主、5h 次排列，并保�
 
 test("BB native accounts render without optional sources and targeted refresh preserves other sources", async t => {
   installTestPluginRuntime();
-  dom.window.localStorage.clear();
+  resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const native: AccountLimitsPanelSnapshot["machines"][number] = { id: "bb:local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
     providers: [{ id: "codex", displayName: "Native Codex", updatedAt: null,
@@ -617,7 +629,7 @@ test("BB native accounts render without optional sources and targeted refresh pr
         usage: { status: "ok", planLabel: "Pro", windows: [{ label: "Weekly limit", usedPercent: 40, resetsAt: null }] } }] }] };
   const pool: AccountLimitsPanelSnapshot["machines"][number] = { id: "pool", source: "account-pool", displayName: "Pool", status: "connected", error: null, providers: [] };
   const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: (raw: unknown) => ({ machines: (raw as { source?: string }).source ? [native] : [native, pool] }) } });
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   await slot.findByLabelText("BB 已有账户 来源");
   assert.ok(slot.getByText("demo@example.test"));
   assert.ok(slot.getByRole("progressbar", { name: /Weekly limit 剩余额度/u }));
@@ -628,14 +640,14 @@ test("BB native accounts render without optional sources and targeted refresh pr
 });
 
 test("failed accounts are hidden by default, can be restored, and the preference survives remount", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
     providers: [{ id: "claude-code", displayName: "Claude", updatedAt: null, usage: { status: "expired" },
       accounts: [{ key: "failed", label: "Failed account", weight: 1, usage: { status: "expired" } }] }] }] };
   const render = () => renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
   let slot = render();
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   await slot.findByText(/暂无可显示的额度/u);
   assert.equal((slot.getByRole("checkbox", { name: "隐藏获取失败" }) as HTMLInputElement).checked, true);
   assert.equal(slot.queryByText("Failed account"), null);
@@ -647,7 +659,7 @@ test("failed accounts are hidden by default, can be restored, and the preference
 });
 
 test("sidebar compact view shares data and preferences with full page and opens the full dashboard", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const footer = app.experimentalSidebarFooterItems[0]!;
   assert.equal(footer.kind, "disclosure");
@@ -660,7 +672,7 @@ test("sidebar compact view shares data and preferences with full page and opens 
   let reads = 0; let dismissed = 0;
   const rpc = { readAccountLimits: () => { reads++; return snapshot; } };
   const compact = renderSlot(footer, { dismiss: () => { dismissed++; } }, { rpc });
-  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { compact.lifecycle.unmount(); resetLegacyPreferences(); });
   await compact.findByText("Healthy");
   assert.ok(compact.getByRole("button", { name: "Codex" }));
   assert.equal(compact.queryByText("Failed"), null);
@@ -671,11 +683,11 @@ test("sidebar compact view shares data and preferences with full page and opens 
   await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
   assert.equal(within(compact.container).getByRole("progressbar", { name: "Weekly limit 已用额度" }).getAttribute("aria-valuenow"), "96");
   assert.ok(within(compact.container).getByRole("button", { name: "Codex" }));
-  assert.ok(within(compact.container).getByText("已用额度 · 账号"));
-  await act(async () => { within(full.container).getByRole("button", { name: "池" }).click(); });
+  assert.ok(within(compact.container).getByText("已用额度 · 池 · 账号详情"));
+  await act(async () => { setAccountDetails(within(full.container), false); });
   assert.ok(within(compact.container).getByText("已用额度 · 池"));
   assert.equal(within(compact.container).queryByText("Healthy"), null);
-  await act(async () => { within(full.container).getByRole("button", { name: "账号" }).click(); within(full.container).getByRole("button", { name: "剩余" }).click(); });
+  await act(async () => { setAccountDetails(within(full.container), true); within(full.container).getByRole("button", { name: "剩余" }).click(); });
   assert.equal(within(compact.container).getByRole("progressbar", { name: "Weekly limit 剩余额度" }).getAttribute("aria-valuenow"), "4");
   assert.equal(reads, 1);
   await act(async () => { compact.getByLabelText("额度显示设置").click(); });
@@ -689,7 +701,7 @@ test("sidebar compact view shares data and preferences with full page and opens 
 });
 
 test("collapsed footer monitoring checks thresholds without duplicate alerts and stops on unmount", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-17T00:00:00Z") });
   const { toast } = await import("sonner");
   const warnings: string[] = [];
@@ -703,7 +715,7 @@ test("collapsed footer monitoring checks thresholds without duplicate alerts and
         { key: "ok", label: "Healthy", weight: 1, usage: { status: "ok", planLabel: null, windows: [{ label: "Weekly limit", usedPercent: used, resetsAt: null }] } },
       ] }] }] };
   } } });
-  t.after(() => { overlay.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { overlay.lifecycle.unmount(); resetLegacyPreferences(); });
   await act(async () => { await Promise.resolve(); });
   assert.equal(reads, 1); assert.equal(warnings.length, 0);
   used = 96;
@@ -717,14 +729,14 @@ test("collapsed footer monitoring checks thresholds without duplicate alerts and
 });
 
 test("opening a page establishes a quiet baseline even when reminder history is absent", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-18T00:00:00Z") });
   const { toast } = await import("sonner");
   const warnings: string[] = [];
   t.mock.method(toast, "warning", (message: unknown) => { warnings.push(String(message)); return 1; });
   let used = 85; let resetsAt = "2026-10-24T00:00:00Z";
   let overlay: ReturnType<typeof renderSlot> | undefined;
-  t.after(() => { overlay?.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { overlay?.lifecycle.unmount(); resetLegacyPreferences(); });
   const reenter = async () => {
     overlay?.lifecycle.unmount();
     const app = await loadPluginApp(() => import("./app.js"));
@@ -758,7 +770,7 @@ test("opening a page establishes a quiet baseline even when reminder history is 
 });
 
 test("reminders disabled at startup do not consume thresholds and the monitor never forces disclosure open", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.reminders", "false");
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-17T00:00:00Z") });
   const { toast } = await import("sonner");
@@ -770,7 +782,7 @@ test("reminders disabled at startup do not consume thresholds and the monitor ne
     providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
       { key: "ok", label: "Healthy", weight: 1, usage: { status: "ok", planLabel: null, windows: [{ label: "Weekly limit", usedPercent: used, resetsAt: null }] } },
     ] }] }] }) } });
-  t.after(() => { overlay.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { overlay.lifecycle.unmount(); resetLegacyPreferences(); });
   const setReminders = async (enabled: boolean) => act(async () => {
     dom.window.localStorage.setItem("account-limits.reminders", String(enabled));
     dom.window.dispatchEvent(new dom.window.Event("storage"));
@@ -791,11 +803,11 @@ test("reminders disabled at startup do not consume thresholds and the monitor ne
 });
 
 test("hidden windows pause periodic reads; visibility and focus resume once and are cleaned up", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-17T00:00:00Z") });
   let visibility = "visible";
   Object.defineProperty(document, "visibilityState", { configurable: true, get: () => visibility });
-  t.after(() => { Reflect.deleteProperty(document, "visibilityState"); dom.window.localStorage.clear(); });
+  t.after(() => { Reflect.deleteProperty(document, "visibilityState"); resetLegacyPreferences(); });
   const app = await loadPluginApp(() => import("./app.js"));
   let reads = 0;
   const overlay = renderSlot(app.appOverlays[0]!, {}, { rpc: { readAccountLimits: () => { reads++; return { machines: [] }; } } });
@@ -820,7 +832,7 @@ test("hidden windows pause periodic reads; visibility and focus resume once and 
 });
 
 test("compact service cards show the weighted pool week instead of the worst account", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.view", "pool");
   const app = await loadPluginApp(() => import("./app.js"));
   const footer = app.experimentalSidebarFooterItems[0]!;
@@ -839,7 +851,7 @@ test("compact service cards show the weighted pool week instead of the worst acc
     ] }] }] };
   const rpc = { readAccountLimits: () => { reads++; return snapshot; } };
   const compact = renderSlot(footer, { dismiss() {} }, { rpc });
-  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { compact.lifecycle.unmount(); resetLegacyPreferences(); });
   const card = await compact.findByRole("button", { name: "Codex" });
   assert.equal(card.querySelector(".limits-compact-service-value")?.textContent, "75%");
   assert.match(card.title, /池.*周.*剩余 75%/u);
@@ -849,13 +861,13 @@ test("compact service cards show the weighted pool week instead of the worst acc
   t.after(() => full.lifecycle.unmount());
   await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
   assert.equal(card.querySelector(".limits-compact-service-value")?.textContent, "25%");
-  await act(async () => { within(full.container).getByRole("button", { name: "账号" }).click(); });
+  await act(async () => { setAccountDetails(within(full.container), true); });
   assert.equal(card.querySelector(".limits-compact-service-value")?.textContent, "25%");
   assert.equal(reads, 1);
 });
 
 test("Gemini generous pace is colored independently from Claude/GPT in compact cards and meters", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.view", "pool");
   const now = Date.parse("2026-10-18T10:00:00Z");
   t.mock.timers.enable({ apis: ["Date"], now });
@@ -874,7 +886,7 @@ test("Gemini generous pace is colored independently from Claude/GPT in compact c
   const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", source: "cliproxy", displayName: "Proxy",
     status: "connected", error: null, providers: [provider] }] };
   const compact = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
-  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { compact.lifecycle.unmount(); resetLegacyPreferences(); });
   const card = await compact.findByRole("button", { name: "Gemini" });
   const metrics = card.querySelectorAll(".limits-compact-service-metric");
   assert.equal(metrics[0]!.getAttribute("data-tone"), "generous");
@@ -897,7 +909,7 @@ test("Gemini generous pace is colored independently from Claude/GPT in compact c
 });
 
 test("compact Claude card shows the measurable weighted week with an explicit partial-data marker", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const footer = app.experimentalSidebarFooterItems[0]!;
   if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
@@ -913,20 +925,20 @@ test("compact Claude card shows the measurable weighted week with an explicit pa
   const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", source: "cliproxy", displayName: "Proxy",
     status: "connected", error: null, providers: [provider] }] };
   const compact = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
-  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { compact.lifecycle.unmount(); resetLegacyPreferences(); });
   const card = await compact.findByRole("button", { name: "Claude" });
   const value = () => card.querySelector(".limits-compact-service-value")?.textContent;
-  assert.equal(value(), "75%*");
+  assert.equal(value(), "未知 · 2/3");
   assert.match(card.title, /覆盖 2\/3/u);
-  assert.match(within(compact.container).getByRole("note", { name: "" }).textContent!, /总周额度按 2\/3 个账号计算；1 个账号未返回总周额度/u);
+  assert.match(within(compact.container).getByRole("note", { name: "" }).textContent!, /数据不完整 · 2\/3 个账号返回该窗口；1 个账号未返回该窗口/u);
   assert.match(card.title, /1 个账号未返回总周额度/u);
   assert.match(card.title, /\*.*仅统计已返回.*不代表全池/u);
   assert.equal(card.querySelector(".limits-compact-service-metrics"), null);
-  assert.ok(within(compact.container).getByText("总周额度未返回"));
+  assert.ok(within(compact.container).getAllByText("总周额度未返回").length > 0);
   const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
   t.after(() => full.lifecycle.unmount());
   await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
-  assert.equal(value(), "25%*");
+  assert.equal(value(), "未知 · 2/3");
   provider.accounts = provider.accounts.slice(0, 2);
   await act(async () => { compact.getByRole("button", { name: "刷新精简额度" }).click(); });
   assert.equal(value(), "25%");
@@ -938,7 +950,7 @@ test("compact Claude card shows the measurable weighted week with an explicit pa
 });
 
 test("Cursor shows subscription and on-demand budgets separately and follows the shared display mode", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const footer = app.experimentalSidebarFooterItems[0]!;
   if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
@@ -951,7 +963,7 @@ test("Cursor shows subscription and on-demand budgets separately and follows the
     ] }] }] };
   const rpc = { readAccountLimits: () => snapshot };
   const compact = renderSlot(footer, { dismiss() {} }, { rpc });
-  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { compact.lifecycle.unmount(); resetLegacyPreferences(); });
   const cursor = await compact.findByRole("button", { name: "Cursor (SDK) · Team" });
   assert.equal(cursor.querySelectorAll(".limits-compact-service-metric").length, 2);
   assert.match(cursor.textContent!, /套餐77%按量19%/u);
@@ -959,18 +971,18 @@ test("Cursor shows subscription and on-demand budgets separately and follows the
   const meters = compact.container.querySelectorAll(".limits-meter");
   assert.equal(meters[0]!.hasAttribute("data-warning"), false);
   assert.equal(meters[1]!.getAttribute("data-warning"), "true");
-  assert.ok(within(compact.container).getByText("套餐额度"));
-  assert.ok(within(compact.container).getByText("按量预算"));
-  assert.equal(within(compact.container).getAllByRole("progressbar").length, 2);
+  assert.ok(within(compact.container).getAllByText("套餐额度").length > 0);
+  assert.ok(within(compact.container).getAllByText("按量预算").length > 0);
+  assert.equal(within(compact.container).getAllByRole("progressbar").length, 4);
   const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
   t.after(() => full.lifecycle.unmount());
   await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
   assert.match(cursor.title, /套餐已用 23%，按量已用 81%/u);
   assert.match(cursor.textContent!, /套餐23%按量81%/u);
-  assert.equal(within(compact.container).getByRole("progressbar", { name: "Plan usage 已用额度" }).getAttribute("aria-valuenow"), "23");
-  assert.equal(within(compact.container).getByRole("progressbar", { name: "On-demand spend 已用额度" }).getAttribute("aria-valuenow"), "81");
-  assert.ok(within(full.container).getByText("套餐额度"));
-  assert.ok(within(full.container).getByText("按量预算"));
+  assert.equal(within(compact.container.querySelector(".limits-pools")!).getByRole("progressbar", { name: "Plan usage 已用额度" }).getAttribute("aria-valuenow"), "23");
+  assert.equal(within(compact.container.querySelector(".limits-pools")!).getByRole("progressbar", { name: "On-demand spend 已用额度" }).getAttribute("aria-valuenow"), "81");
+  assert.ok(within(full.container).getAllByText("套餐额度").length > 0);
+  assert.ok(within(full.container).getAllByText("按量预算").length > 0);
 });
 
 test("池把整池节奏和最近账号余量分开显示，两种来源及百分比模式均不额外请求", async t => {
@@ -980,7 +992,7 @@ test("池把整池节奏和最近账号余量分开显示，两种来源及百�
   const app = await loadPluginApp(() => import("./app.js"));
   const at = (hours: number) => new Date(now.getTime() + hours * 3_600_000).toISOString();
   for (const source of ["cliproxy", "account-pool"] as const) {
-    dom.window.localStorage.clear();
+    resetLegacyPreferences();
     dom.window.localStorage.setItem("account-limits.view", "pool");
     const weeklyId = source === "account-pool" ? "weekly-all" : "7d";
     const make = (key: string, remaining: number, hours: number) => ({ key, label: key, weight: 1, updatedAt: at(0),
@@ -994,7 +1006,7 @@ test("池把整池节奏和最近账号余量分开显示，两种来源及百�
         usage: { status: "ok", planLabel: null, windows: [] }, accounts: [make("最近账号", 60, 7.5), make("B", 0, 144), make("C", 0, 144), make("D", 30, 144), make("E", 65, 144)] }],
     }] };
     const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-    t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+    t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
     await slot.findByText("Claude");
     const weekly = within(slot.getByRole("group", { name: "周额度" }));
     const opportunity = weekly.getByRole("note", { name: /^周额度建议：快用临期额度/u });
@@ -1009,17 +1021,17 @@ test("池把整池节奏和最近账号余量分开显示，两种来源及百�
     assert.match(next().textContent!, /周剩 60%/u);
     assert.equal(slot.queryByRole("button", { name: /恢复计划/u }), null);
     assert.equal(slot.queryByRole("dialog", { hidden: true }), null);
-    await act(async () => { slot.getByRole("button", { name: "账号" }).click(); });
+    await act(async () => { setAccountDetails(slot, true); });
     assert.equal(slot.queryByText("整池节奏"), null);
-    assert.equal(slot.queryByRole("note", { name: /^周额度建议：快用临期额度/u }), null);
-    assert.equal(slot.queryByRole("note", { name: /^最近重置账号/u }), null);
+    assert.ok(within(slot.container.querySelector(".limits-pools")!).getByRole("note", { name: /^周额度建议：快用临期额度/u }));
+    assert.ok(within(slot.container.querySelector(".limits-pools")!).getByRole("note", { name: /^最近重置账号/u }));
     assert.equal(slot.inspection.rpcCalls.length, 1);
     slot.lifecycle.unmount();
   }
 });
 
 test("7分钟后重置且剩39%时，完整面板与小窗以快用临期额度为主建议", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.view", "pool");
   const now = Date.parse("2026-10-26T00:00:00Z");
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now });
@@ -1037,7 +1049,7 @@ test("7分钟后重置且剩39%时，完整面板与小窗以快用临期额度�
   const rpc = { readAccountLimits: () => snapshot };
   const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
   const compact = renderSlot(footer, { dismiss() {} }, { rpc });
-  t.after(() => { full.lifecycle.unmount(); compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { full.lifecycle.unmount(); compact.lifecycle.unmount(); resetLegacyPreferences(); });
   await within(full.container).findByText("Claude");
   await within(compact.container).findByRole("button", { name: "Claude" });
   const check = () => {
@@ -1071,7 +1083,7 @@ test("最近重置摘要显示同批账号状态，越过重置时等待确认�
   installTestPluginRuntime();
   const now = new Date("2026-10-17T00:00:00Z");
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now });
-  dom.window.localStorage.clear();
+  resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.view", "pool");
   const app = await loadPluginApp(() => import("./app.js"));
   const at = (hours: number) => new Date(now.getTime() + hours * 3_600_000).toISOString();
@@ -1084,7 +1096,7 @@ test("最近重置摘要显示同批账号状态，越过重置时等待确认�
       accounts: [make("零余量", 0), blocked, make("少量", 0.01), make("晚重置", 80, 4)] }],
   }] };
   const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   await slot.findByText("Codex");
   const next = () => slot.getByRole("note", { name: /^最近重置账号/u });
   assert.match(next().textContent!, /3 个账号.*1 有余量、1 已耗尽、1 5h 暂受限/u);
@@ -1107,7 +1119,7 @@ test("部分重置时间未知时只称最近已知，旧测量与全部未知�
   installTestPluginRuntime();
   const now = new Date("2026-10-17T00:00:00Z");
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now });
-  dom.window.localStorage.clear();
+  resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.view", "pool");
   const app = await loadPluginApp(() => import("./app.js"));
   const at = (hours: number) => new Date(now.getTime() + hours * 3_600_000).toISOString();
@@ -1119,7 +1131,7 @@ test("部分重置时间未知时只称最近已知，旧测量与全部未知�
   }] };
   const render = () => renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
   let slot = render();
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   await slot.findByText("Codex");
   const next = () => slot.getByRole("note", { name: /^最近已知重置账号/u });
   assert.match(next().textContent!, /最近已知重置.*周剩 42%.*建议先用/u);
@@ -1140,7 +1152,7 @@ test("部分重置时间未知时只称最近已知，旧测量与全部未知�
 });
 
 test("small Gemini pool usage stays visible instead of rounding to an empty quota bar", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.view", "pool");
   dom.window.localStorage.setItem("account-limits.display-mode", "used");
   const app = await loadPluginApp(() => import("./app.js"));
@@ -1155,7 +1167,7 @@ test("small Gemini pool usage stays visible instead of rounding to an empty quot
     providers: [{ id: "cliproxy-antigravity", displayName: "Gemini", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts }] }] };
   const rpc = { readAccountLimits: () => snapshot };
   const compact = renderSlot(footer, { dismiss() {} }, { rpc });
-  t.after(() => { compact.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { compact.lifecycle.unmount(); resetLegacyPreferences(); });
   const card = await compact.findByRole("button", { name: "Gemini" });
   const value = () => card.querySelector('.limits-compact-service-value')?.textContent;
   assert.equal(value(), "0.3%");
@@ -1177,7 +1189,7 @@ test("small Gemini pool usage stays visible instead of rounding to an empty quot
 });
 
 test("Ultra and Pro stay separate in full pools, compact cards, reset batches and pacing", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.view", "pool");
   const now = Date.parse("2026-10-22T00:00:00Z");
   t.mock.timers.enable({ apis: ["Date"], now });
@@ -1193,7 +1205,7 @@ test("Ultra and Pro stay separate in full pools, compact cards, reset batches an
   const app = await loadPluginApp(() => import("./app.js"));
   const rpc = { readAccountLimits: () => snapshot };
   const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
-  t.after(() => { full.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { full.lifecycle.unmount(); resetLegacyPreferences(); });
   const ultra = within(await full.findByRole("region", { name: "Google AI Ultra 的池额度" }));
   const pro = within(full.getByRole("region", { name: "Google AI Pro 的池额度" }));
   assert.equal(ultra.getByRole("progressbar", { name: "Gem 7d 剩余额度" }).getAttribute("aria-valuenow"), "10");
@@ -1229,7 +1241,7 @@ test("Ultra and Pro stay separate in full pools, compact cards, reset batches an
 });
 
 test("compact disclosure closes on outside activation without swallowing clicks", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const footer = app.experimentalSidebarFooterItems[0]!;
   if (footer.kind !== "disclosure") throw new Error("Missing compact disclosure");
@@ -1238,7 +1250,7 @@ test("compact disclosure closes on outside activation without swallowing clicks"
   let dismissed = 0; let activated = 0;
   outside.addEventListener("click", () => { activated++; });
   const slot = renderSlot(footer, { dismiss: () => { dismissed++; } }, { rpc: { readAccountLimits: () => ({ machines: [] }) } });
-  t.after(() => { slot.lifecycle.unmount(); outside.remove(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); outside.remove(); resetLegacyPreferences(); });
   await slot.findByLabelText("额度显示设置");
   await act(async () => { slot.getByLabelText("额度显示设置").click(); });
   await act(async () => { slot.getByRole("checkbox", { name: "隐藏失败" }).click(); });
@@ -1256,7 +1268,7 @@ test("compact disclosure closes on outside activation without swallowing clicks"
 });
 
 test("outside dismissal waits for the native footer toggle and does not consume the opening click", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const footer = app.experimentalSidebarFooterItems[0]!;
   if (footer.kind !== "disclosure") throw new Error("Missing compact disclosure");
@@ -1267,7 +1279,7 @@ test("outside dismissal waits for the native footer toggle and does not consume 
     opened = !opened;
     if (opened && !slot) slot = renderSlot(footer, { dismiss: () => { opened = false; dismissed++; } }, { rpc: { readAccountLimits: () => ({ machines: [] }) } });
   });
-  t.after(() => { slot?.lifecycle.unmount(); trigger.remove(); dom.window.localStorage.clear(); });
+  t.after(() => { slot?.lifecycle.unmount(); trigger.remove(); resetLegacyPreferences(); });
   await act(async () => { trigger.click(); });
   assert.equal(opened, true); assert.equal(dismissed, 0);
   await act(async () => { trigger.click(); });
@@ -1276,7 +1288,7 @@ test("outside dismissal waits for the native footer toggle and does not consume 
 });
 
 test("outside dismissal removes listeners and abandons queued work on compact unmount", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const footer = app.experimentalSidebarFooterItems[0]!;
   if (footer.kind !== "disclosure") throw new Error("Missing compact disclosure");
@@ -1284,7 +1296,7 @@ test("outside dismissal removes listeners and abandons queued work on compact un
   let dismissed = 0;
   const render = () => renderSlot(footer, { dismiss: () => { dismissed++; } }, { rpc: { readAccountLimits: () => ({ machines: [] }) } });
   let slot = render();
-  t.after(() => { slot.lifecycle.unmount(); outside.remove(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); outside.remove(); resetLegacyPreferences(); });
   await act(async () => { outside.click(); slot.lifecycle.unmount(); });
   assert.equal(dismissed, 0);
   await act(async () => { outside.click(); });
@@ -1295,7 +1307,7 @@ test("outside dismissal removes listeners and abandons queued work on compact un
 });
 
 test("outside activation keeps input focus after the host closes and restores its trigger", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const footer = app.experimentalSidebarFooterItems[0]!;
   if (footer.kind !== "disclosure") throw new Error("Missing compact disclosure");
@@ -1307,14 +1319,14 @@ test("outside activation keeps input focus after the host closes and restores it
     useLayoutEffect(() => { if (!open) trigger.focus(); }, [open]);
     return open ? <Component dismiss={() => setOpen(false)} /> : null;
   } }, { dismiss() {} }, { rpc: { readAccountLimits: () => ({ machines: [] }) } });
-  t.after(() => { slot.lifecycle.unmount(); input.remove(); trigger.remove(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); input.remove(); trigger.remove(); resetLegacyPreferences(); });
   await act(async () => { input.focus(); input.click(); });
   assert.equal(slot.queryByLabelText("账户额度精简版"), null);
   assert.equal(document.activeElement, input);
 });
 
 test("weekly budgets lead every source, with matched 5h windows as secondary status", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const sources = ["cliproxy", "account-pool", "bb-providers"] as const;
   const snapshot: AccountLimitsPanelSnapshot = { machines: sources.map(source => ({
@@ -1336,7 +1348,7 @@ test("weekly budgets lead every source, with matched 5h windows as secondary sta
     }),
   })) };
   const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   for (const source of sources) for (const kind of ["codex", "claude", "antigravity"]) {
     if (source === "bb-providers" && kind === "codex") continue; // Usable Account Pooler Codex replaces the native duplicate.
     const account = await slot.findByRole("region", { name: `${source}-${kind} 的额度` });
@@ -1353,7 +1365,7 @@ test("weekly budgets lead every source, with matched 5h windows as secondary sta
       assert.deepEqual(within(cg.closest('[role="group"]') as HTMLElement).getAllByRole("progressbar").map(m => m.getAttribute("aria-valuenow")), ["22", "44"]);
     } else assert.ok(within(account).getByText("暂受限"));
   }
-  await act(async () => { slot.getByRole("button", { name: "池" }).click(); });
+  await act(async () => { setAccountDetails(slot, false); });
   assert.equal(slot.container.querySelectorAll(".limits-session").length, 11);
   await act(async () => { slot.getByRole("button", { name: "已用（Used）" }).click(); });
   const claude = within(slot.getByRole("article", { name: "claude · Cliproxy" }));
@@ -1362,7 +1374,7 @@ test("weekly budgets lead every source, with matched 5h windows as secondary sta
 });
 
 test("pool percentages use the whole pool, show decimal precision and count reporting accounts", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   dom.window.localStorage.setItem("account-limits.view", "pool");
   const app = await loadPluginApp(() => import("./app.js"));
   const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "pool", source: "account-pool", displayName: "Pool", status: "connected", error: null,
@@ -1372,9 +1384,9 @@ test("pool percentages use the whole pool, show decimal precision and count repo
     }],
   }] };
   const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   await slot.findByText("Codex");
-  await act(async () => { slot.getByRole("button", { name: "池" }).click(); slot.getByRole("button", { name: "已用（Used）" }).click(); });
+  await act(async () => { setAccountDetails(slot, false); slot.getByRole("button", { name: "已用（Used）" }).click(); });
   assert.ok(slot.getByText("6.3%"));
   assert.ok(slot.getByText(/3 个账号汇总/u));
   const footer = app.experimentalSidebarFooterItems[0]!;
@@ -1388,23 +1400,24 @@ test("pool percentages use the whole pool, show decimal precision and count repo
 });
 
 test("5h-only observations stay secondary and explicitly leave weekly quota unknown", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "native", source: "bb-providers", displayName: "Native", status: "connected", error: null,
     providers: [{ id: "codex", displayName: "Codex", updatedAt: null, accounts: [], usage: { status: "ok", planLabel: null,
       windows: [{ accountLabel: "Legacy", label: "Legacy · 5-hour limit", usedPercent: 20, resetsAt: null }] } }],
   }] };
   const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
   await slot.findByText("Legacy");
-  assert.ok(slot.getByText("周额度未返回"));
-  assert.equal(slot.getAllByRole("progressbar").length, 1);
-  assert.equal(slot.getByRole("progressbar").getAttribute("aria-valuenow"), "80");
+  const detail = within(slot.getByRole("region", { name: "Legacy 的额度" }));
+  assert.ok(detail.getByText("周额度未返回"));
+  assert.equal(slot.getAllByRole("progressbar").length, 2);
+  assert.equal(detail.getByRole("progressbar").getAttribute("aria-valuenow"), "80");
   assert.equal(slot.container.querySelectorAll(".limits-meter-track").length, 0);
 });
 
 test("native Codex model sessions stay attached to their own weekly quota", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const app = await loadPluginApp(() => import("./app.js"));
   const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "native", source: "bb-providers", displayName: "Native", status: "connected", error: null,
     providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] },
@@ -1416,17 +1429,19 @@ test("native Codex model sessions stay attached to their own weekly quota", asyn
     }],
   }] };
   const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
-  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
-  const a = within(await slot.findByRole("group", { name: "demo-a 周额度" }));
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
+  await slot.findByRole("region", { name: "Native 的额度" });
+  const detail = within(slot.getByRole("region", { name: "Native 的额度" }));
+  const a = within(detail.getByRole("group", { name: "demo-a 周额度" }));
   assert.deepEqual(a.getAllByRole("progressbar").map(bar => bar.getAttribute("aria-valuenow")), ["80", "20"]);
-  const b = within(slot.getByRole("group", { name: "demo-b 周额度" }));
+  const b = within(detail.getByRole("group", { name: "demo-b 周额度" }));
   assert.ok(b.getByText("demo-b 周额度未返回"));
   assert.equal(b.getByRole("progressbar").getAttribute("aria-valuenow"), "70");
-  assert.equal(slot.container.querySelectorAll(".limits-meter-track").length, 1);
+  assert.equal(slot.container.querySelectorAll(".limits-meter-track").length, 2);
 });
 
 test("quota monitor notifies the resource pool independent of account/pool and display mode", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-26T00:00:00Z") });
   const { toast } = await import("sonner"); const warnings: string[] = [];
   t.mock.method(toast, "warning", (message: unknown) => { warnings.push(String(message)); return 1; });
@@ -1443,7 +1458,7 @@ test("quota monitor notifies the resource pool independent of account/pool and d
   } };
   const monitor = renderSlot(app.appOverlays[0]!, {}, { rpc });
   const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
-  t.after(() => { monitor.lifecycle.unmount(); full.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { monitor.lifecycle.unmount(); full.lifecycle.unmount(); resetLegacyPreferences(); });
   await full.findByText("Codex");
   percentages = [100, 0, 0];
   await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
@@ -1454,14 +1469,14 @@ test("quota monitor notifies the resource pool independent of account/pool and d
   assert.match(warnings[0]!, /资源池.*已用 80%.*3 个账号汇总/u);
   assert.doesNotMatch(warnings[0]!, /Account [0-9]/u);
   const before = reads;
-  await act(async () => { full.getByRole("button", { name: "池" }).click(); full.getByRole("button", { name: "已用（Used）" }).click(); });
+  await act(async () => { setAccountDetails(full, false); full.getByRole("button", { name: "已用（Used）" }).click(); });
   assert.equal(warnings.length, 1); assert.equal(reads, before);
   await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
   assert.equal(warnings.length, 1);
 });
 
 test("小窗可直接切换模式与视图，保持服务选择、偏好共享且说明可点开", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear();
+  installTestPluginRuntime(); resetLegacyPreferences();
   const now = Date.parse("2026-10-26T00:00:00Z");
   t.mock.timers.enable({ apis: ["Date"], now });
   const at = (hours: number) => new Date(now + hours * 3600000).toISOString();
@@ -1479,15 +1494,15 @@ test("小窗可直接切换模式与视图，保持服务选择、偏好共享�
   let dismisses = 0;
   const compact = renderSlot(footer, { dismiss: () => { dismisses++; } }, { rpc });
   const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
-  t.after(() => { compact.lifecycle.unmount(); full.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  t.after(() => { compact.lifecycle.unmount(); full.lifecycle.unmount(); resetLegacyPreferences(); });
   const c = within(compact.container), f = within(full.container);
   const card = await c.findByRole("button", { name: "Codex · Pro" });
-  await act(async () => { c.getByRole("button", { name: "小窗：池" }).click(); c.getByRole("button", { name: "小窗：已用" }).click(); });
+  await act(async () => { setAccountDetails(c, false); c.getByRole("button", { name: "小窗：已用" }).click(); });
   assert.equal(card.getAttribute("aria-pressed"), "true");
   assert.equal(card.getAttribute("data-tone"), "generous");
   assert.equal(card.querySelector(".limits-compact-service-value")!.textContent, "81%");
   assert.equal(f.getByRole("button", { name: "已用（Used）" }).getAttribute("aria-pressed"), "true");
-  assert.equal(f.getByRole("button", { name: "池" }).getAttribute("aria-pressed"), "true");
+  assert.equal((f.getByRole("checkbox", { name: "显示账号详情" }) as HTMLInputElement).checked, false);
   for (const root of [c, f]) {
     const meter = root.getByRole("progressbar", { name: "7d 已用额度" }).closest(".limits-meter")!;
     assert.equal(meter.getAttribute("data-tone"), "generous");
@@ -1502,7 +1517,7 @@ test("小窗可直接切换模式与视图，保持服务选择、偏好共享�
   await act(async () => { next.querySelector("summary")!.click(); });
   assert.equal(next.open, true);
   assert.match(next.querySelector(".limits-explanation-copy")!.textContent!, /Example one：周剩 19%/u);
-  await act(async () => { c.getByRole("button", { name: "小窗：剩余" }).click(); c.getByRole("button", { name: "小窗：账号" }).click(); });
+  await act(async () => { c.getByRole("button", { name: "小窗：剩余" }).click(); setAccountDetails(c, true); });
   assert.equal(card.querySelector(".limits-compact-service-value")!.textContent, "19%");
   assert.equal(f.getByRole("button", { name: "剩余" }).getAttribute("aria-pressed"), "true");
   assert.ok(c.getByRole("region", { name: "Example one 的额度" }));
@@ -1521,7 +1536,7 @@ test("account views show the nearest weekly reset first in both panels and every
   const at = (hours: number) => new Date(now + hours * 3_600_000).toISOString();
   for (const source of ["cliproxy", "account-pool", "bb-providers"] as const) {
     for (const legacy of [false, true]) {
-      dom.window.localStorage.clear();
+      resetLegacyPreferences();
       const app = await loadPluginApp(() => import("./app.js"));
       const footer = app.experimentalSidebarFooterItems[0]!;
       if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
@@ -1566,4 +1581,164 @@ test("account views show the nearest weekly reset first in both panels and every
       } finally { compact.lifecycle.unmount(); full.lifecycle.unmount(); }
     }
   }
+});
+
+test("partial Claude pool keeps failed capacity, marks unknown data and never advises conserving the whole pool", async t => {
+  installTestPluginRuntime(); resetLegacyPreferences();
+  const now = Date.now();
+  const make = (key: string, planLabel: string, usedPercent: number) => ({ key, label: key, weight: 1,
+    usage: { status: "ok" as const, planLabel, windows: [{ label: "Weekly limit", usedPercent,
+      resetsAt: new Date(now + 48 * 3600_000).toISOString() }] } });
+  const failed = make("Account B", "Ultra", 10);
+  const historical = { usage: failed.usage, updatedAt: new Date(now - 2 * 3600_000).toISOString() };
+  const provider = { id: "cliproxy-claude", displayName: "Claude", updatedAt: new Date(now).toISOString(),
+    usage: { status: "ok" as const, planLabel: "1/2 accounts", windows: [] },
+    accounts: [make("Account A", "Max 5x", 95), { ...failed, usage: { status: "error" as const, message: "temporary query failure" }, lastKnown: historical }] };
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", displayName: "Proxy", source: "cliproxy",
+    status: "connected", error: null, providers: [provider] }] };
+  const app = await loadPluginApp(() => import("./app.js"));
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { full.lifecycle.unmount(); resetLegacyPreferences(); });
+  await full.findByText("Claude");
+  await act(async () => { setAccountDetails(full, false); });
+  const meter = full.getByRole("progressbar", { name: "已获取账号的 7d 剩余额度" });
+  assert.equal(meter.getAttribute("aria-valuenow"), "5");
+  assert.match(full.container.textContent!, /数据不完整 · 1\/2 个账号返回该窗口/u);
+  assert.equal(full.queryByText("节约用"), null);
+  assert.equal(meter.closest("li")?.getAttribute("data-tone"), "unknown");
+  const width = full.container.querySelector<HTMLElement>(".limits-meter-known")!.style.width;
+  assert.ok(Math.abs(parseFloat(width) - 100 / 3) < 0.01, "failed Ultra retains twice Max 5x weekly capacity");
+  assert.match(full.container.textContent!, /上次周剩余 90%（非当前额度）/u);
+  assert.equal(full.container.querySelectorAll(".limits-pool").length, 1);
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing footer");
+  const compact = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => compact.lifecycle.unmount());
+  const card = await compact.findByRole("button", { name: "Claude · 周额度加权汇总" });
+  assert.equal(card.querySelector(".limits-compact-service-value")?.textContent, "未知 · 1/2");
+  historical.usage.windows[0]!.resetsAt = new Date(now - 3600_000).toISOString();
+  await act(async () => { full.getByRole("button", { name: "刷新全部" }).click(); });
+  assert.match(full.container.textContent!, /已过重置时间，额度待更新/u);
+  assert.doesNotMatch(full.container.textContent!, /上次周剩余 90%/u);
+});
+
+test("pool summary is the default and account details expand below it across both panels without quota requests", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  let reads = 0;
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "demo", displayName: "Proxy", source: "cliproxy", status: "connected", error: null,
+    providers: [{ id: "cliproxy-codex", displayName: "Codex", updatedAt: null,
+      usage: { status: "ok", planLabel: null, windows: [] }, accounts: [{ key: "a", label: "Example account", weight: 1,
+        usage: { status: "ok", planLabel: "Pro", windows: [{ label: "Weekly limit", usedPercent: 30, resetsAt: null }] } }] }] }] };
+  const rpc = { readAccountLimits: () => { reads++; return snapshot; } };
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
+  t.after(() => { full.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await full.findByText("Codex");
+  const f = within(full.container);
+  assert.equal((f.getByRole("checkbox", { name: "显示账号详情" }) as HTMLInputElement).checked, false);
+  assert.ok(full.container.querySelector(".limits-pools"));
+  assert.equal(f.queryByRole("region", { name: "Example account 的额度" }), null);
+  assert.equal(f.queryByRole("button", { name: "池" }), null);
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing disclosure");
+  const compact = renderSlot(footer, { dismiss() {} }, { rpc });
+  t.after(() => compact.lifecycle.unmount());
+  const c = within(compact.container);
+  const card = await c.findByRole("button", { name: "Codex · Pro" });
+  const value = card.textContent;
+  await act(async () => { setAccountDetails(c, true); });
+  for (const root of [full, compact]) {
+    const scope = within(root.container);
+    assert.ok(root.container.querySelector(".limits-pools"));
+    assert.ok(scope.getByRole("region", { name: "Example account 的额度" }));
+    assert.ok(root.container.querySelector(".limits-pools")!.compareDocumentPosition(root.container.querySelector(".limits-account-details")!) & Node.DOCUMENT_POSITION_FOLLOWING);
+  }
+  assert.equal(card.textContent, value);
+  assert.equal(reads, 1);
+  await act(async () => { setAccountDetails(f, false); });
+  for (const root of [full, compact]) {
+    assert.ok(root.container.querySelector(".limits-pools"));
+    assert.equal(within(root.container).queryByRole("region", { name: "Example account 的额度" }), null);
+  }
+  assert.equal(reads, 1);
+});
+
+test("a failed-only tier shows unknown coverage and does not steal the default selection", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", displayName: "Proxy", source: "cliproxy", status: "connected", error: null,
+    providers: [{ id: "cliproxy-codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
+      { key: "bad", label: "Failed tier", weight: 1, usage: { status: "error", message: "lookup unavailable" }, lastKnown: { updatedAt: "2026-11-10T00:00:00Z",
+        usage: { status: "ok", planLabel: "Pro", windows: [{ label: "Weekly limit", usedPercent: 40, resetsAt: null }] } } },
+      { key: "good", label: "Healthy tier", weight: 1, usage: { status: "ok", planLabel: "Team", windows: [{ label: "Weekly limit", usedPercent: 30, resetsAt: null }] } },
+    ] }] }] };
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing disclosure");
+  const slot = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const failed = await slot.findByRole("button", { name: "Codex · Pro" });
+  assert.match(failed.textContent!, /未知 · 0\/1/u);
+  assert.equal(slot.getByRole("button", { name: "Codex · Team" }).getAttribute("aria-pressed"), "true");
+  assert.ok(slot.container.querySelector(".limits-pools"));
+});
+
+test("historical model-family quota stays labeled and missing healthy windows are not called query failures", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear(); dom.window.localStorage.setItem("account-limits.hide-failures", "false");
+  const app = await loadPluginApp(() => import("./app.js"));
+  const gem = { label: "Gemini Models: Weekly limit", usedPercent: 20, resetsAt: null };
+  const cg = { label: "Claude and GPT models: Weekly limit", usedPercent: 80, resetsAt: null };
+  const good = (key: string, windows: typeof gem[]) => ({ key, label: key, weight: 1, usage: { status: "ok" as const, planLabel: "Google AI Ultra", windows } });
+  const provider = { id: "cliproxy-antigravity", displayName: "Gemini", updatedAt: null, usage: { status: "ok" as const, planLabel: null, windows: [] },
+    accounts: [good("Full", [gem, cg]), good("Gem only", [gem]), { key: "history", label: "History", weight: 1,
+      usage: { status: "error" as const, message: "unavailable" }, lastKnown: { updatedAt: "2026-11-10T00:00:00Z",
+        usage: { status: "ok" as const, planLabel: "Google AI Pro", windows: [gem, cg] } } }] };
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", displayName: "Proxy", source: "cliproxy", status: "connected", error: null, providers: [provider] }] };
+  const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await slot.findByText("Gemini");
+  const history = slot.container.querySelector(".limits-unknown-accounts")!;
+  assert.match(history.textContent!, /Gem 7d：上次周剩余 80%/u);
+  assert.match(history.textContent!, /C\/G 7d：上次周剩余 20%/u);
+  const healthy = slot.getByRole("region", { name: "Google AI Ultra 的池额度" });
+  assert.match(healthy.textContent!, /1 个账号未返回该窗口/u);
+  assert.doesNotMatch(healthy.textContent!, /查询失败/u);
+});
+
+test("expired and unauthenticated accounts keep their own reasons instead of query-failure usability advice", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear(); dom.window.localStorage.setItem("account-limits.hide-failures", "false");
+  const app = await loadPluginApp(() => import("./app.js"));
+  const accounts: AccountLimitsPanelSnapshot["machines"][number]["providers"][number]["accounts"] = [
+    { key: "good", label: "Healthy", weight: 1, usage: { status: "ok", planLabel: null, windows: [{ label: "Weekly limit", usedPercent: 30, resetsAt: null }] } },
+    ...(["expired", "unauthenticated", "not_installed"] as const).map(status => ({ key: status, label: status, weight: 1, usage: { status } })),
+  ];
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "native", displayName: "Native", source: "bb-providers", status: "connected", error: null,
+    providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts }] }] };
+  const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  await slot.findByText("Codex");
+  assert.match(slot.container.textContent!, /登录已过期，需重新登录/u);
+  assert.match(slot.container.textContent!, /尚未登录，需登录/u);
+  assert.match(slot.container.textContent!, /所需组件未安装/u);
+  assert.match(slot.container.textContent!, /3 个账号登录或安装状态异常/u);
+  assert.doesNotMatch(slot.container.textContent!, /查询失败|不能使用/u);
+});
+
+test("legacy flattened success beats an earlier failed-only card as the compact default", async t => {
+  installTestPluginRuntime(); dom.window.localStorage.clear(); dom.window.localStorage.setItem("account-limits.hide-failures", "false");
+  const app = await loadPluginApp(() => import("./app.js"));
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "native", displayName: "Native", source: "bb-providers", status: "connected", error: null,
+    providers: [
+      { id: "claude-code", displayName: "Claude", updatedAt: null, usage: { status: "error", message: "lookup unavailable" },
+        accounts: [{ key: "failed", label: "Failed", weight: 1, usage: { status: "error", message: "lookup unavailable" } }] },
+      { id: "codex", displayName: "Codex", updatedAt: null, accounts: [], usage: { status: "ok", planLabel: null,
+        windows: [{ accountLabel: "Legacy", label: "Legacy · Weekly limit", usedPercent: 20, resetsAt: null }] } },
+    ] }] };
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing disclosure");
+  const slot = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
+  const card = await slot.findByRole("button", { name: "Codex" });
+  assert.equal(card.getAttribute("aria-pressed"), "true");
+  assert.equal(slot.getByRole("button", { name: "Claude" }).getAttribute("aria-pressed"), "false");
+  assert.equal(slot.getByRole("progressbar", { name: "7d 剩余额度" }).getAttribute("aria-valuenow"), "80");
 });

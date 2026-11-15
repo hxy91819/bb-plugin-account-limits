@@ -271,4 +271,12 @@ export const panelStyles = `
   .limits-compact .limits-segment { min-width: 36px; min-height: 36px; }
   .limits-panel .limits-explanation > summary { min-height: 28px; padding-block: 3px; }
 }
+.limits-panel .limits-meter-track:has(.limits-meter-unknown) { display:flex; }
+.limits-panel .limits-meter-known { height:100%; flex-shrink:0; }
+.limits-panel .limits-meter-unknown { height:100%; background:var(--muted-foreground); opacity:.45; border-left:2px solid var(--background); }
+.limits-panel .limits-unknown-accounts { color:var(--muted-foreground); font-size:12px; margin:8px 0; }
+.limits-panel .limits-unknown-accounts p { overflow-wrap:anywhere; }
+.limits-panel .limits-unknown-accounts p > span { display:block; }
+.limits-panel .limits-account-details { margin-top:20px; padding-top:16px; border-top:1px solid var(--limits-line); }
+.limits-panel .limits-account-details > h3 { font-size:12px; font-weight:550; color:var(--muted-foreground); margin-bottom:12px; }
 `;

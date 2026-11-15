@@ -1,5 +1,5 @@
 import { cliproxyProviderDisplayName, cliproxyProviderId } from "./config.js";
-import { aggregateCliproxyPool, groupAccountPools, normalizeCliproxyWindow, orderQuotaWindows, type AccountPoolGroup, type CliproxyWindowIdentity, type PoolWindow } from "./pool.js";
+import { aggregateCliproxyPool, groupAccountPools, normalizeCliproxyWindow, orderQuotaWindows, type AccountPoolGroup, type CliproxyWindowIdentity, verifiedAccountPlan, type PoolWindow } from "./pool.js";
 import type { QuotaAccount, ProviderSnapshot } from "./contract.js";
 import {
   usageFetchMethod,
@@ -144,7 +144,8 @@ export function createCliproxyUsageSource(deps: CliproxyUsageSourceDeps) {
         const snapshot = await deps.readHost(hostId, [providerId]);
         const updatedAtMs = deps.now();
         deps.updateCache(hostId, snapshot.providers, updatedAtMs);
-        const refreshed = snapshot.providers.find(entry => entry.id === providerId);
+        const current = snapshot.providers.find(entry => entry.id === providerId);
+        const refreshed = current ? deps.readCache(hostId)?.providers.find(entry => entry.id === providerId) ?? current : undefined;
         if (!refreshed) throw new Error("Usage resource no longer exists.");
         provider = refreshed;
         observedAtMs = updatedAtMs;
@@ -156,6 +157,11 @@ export function createCliproxyUsageSource(deps: CliproxyUsageSourceDeps) {
         const pool = aggregateCliproxyPool(group.accounts);
         if (pool.status !== "ok") {
           return { accountKey: null, observedAt: null, usage: { status: "error", ...accountFields, message: pool.message } };
+        }
+        if (group.accounts.some(account => account.usage.status !== "ok")
+          || provider.accounts.some(account => account.usage.status !== "ok" && !verifiedAccountPlan(account))) {
+          return { accountKey: null, observedAt: null, usage: { status: "error", ...accountFields,
+            message: "数据不完整：部分账号额度未知，已获取账号的百分比不能代表全池。请查看账号详情确认查询或登录状态。" } };
         }
         return {
           accountKey: null,

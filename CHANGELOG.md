@@ -1,5 +1,9 @@
 # Changelog
 
+- Always show pool summaries, with an optional shared account-details disclosure instead of switching views.
+
+- Keep failed quota reads in their verified capacity pool, mark partial totals unknown, and retain timestamped last-success details without treating them as current allowance.
+
 ## 0.4.0
 
 - Sort account views by the nearest upcoming weekly reset in both panels; keep pending and unknown times after upcoming resets without changing pool inputs.

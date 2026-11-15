@@ -311,3 +311,42 @@ test("Claude weekly resource uses the same capacity ratios and estimate notice a
   assert.deepEqual(accounts, before);
   await assert.rejects(() => get(source, "pool:claude:type-pro", false), /no longer exists/u);
 });
+
+test("public pool usage reports unknown when a failed account retains its verified capacity", async () => {
+  const base = twoAccounts[0]!;
+  if (base.usage.status !== "ok") throw new Error("fixture");
+  const good = { ...base, usage: { ...base.usage, planLabel: "Max 5x" } };
+  const failed: SnapshotProvider["accounts"][number] = { ...twoAccounts[1]!, usage: { status: "error", message: "quota lookup unavailable" },
+    lastKnown: { updatedAt: "2026-10-05T01:00:00Z", usage: { status: "ok", planLabel: "Ultra", windows: [{ label: "Weekly limit", usedPercent: 0, resetsAt: null }] } } };
+  const { source } = makeSource({ cached: [{ ...provider([good, failed]), updatedAtMs: 42 }] });
+  const result = await get(source, "pool:claude:claude-weighted-weekly", false);
+  assert.equal(result.usage.status, "error");
+  assert.equal(result.observedAt, null);
+  if (result.usage.status === "error") assert.match(result.usage.message, /数据不完整/u);
+  assert.equal((await get(source, "account:claude:key-work", false)).usage.status, "ok");
+});
+
+test("public weighted pools cannot claim completeness from identity fallback historical plans", async () => {
+  const base = twoAccounts[0]!;
+  if (base.usage.status !== "ok") throw new Error("fixture");
+  const good = { ...base, usage: { ...base.usage, planLabel: "Max 5x" } };
+  const failed: SnapshotProvider["accounts"][number] = { key: "unknown", label: "Person", weight: 1,
+    usage: { status: "error", message: "lookup unavailable" }, lastKnown: { updatedAt: "2026-11-10T00:00:00Z",
+      usage: { status: "ok", planLabel: "person@example.test", windows: [] } } };
+  const { source } = makeSource({ cached: [{ ...provider([good, failed]), updatedAtMs: 42 }] });
+  assert.equal((await get(source, "pool:claude:claude-weighted-weekly", false)).usage.status, "error");
+});
+
+test("historical 5h-only Claude query failures do not invalidate the separate full-week resource", async () => {
+  const full: SnapshotProvider["accounts"][number] = { key: "full", label: "Full", weight: 1,
+    usage: { status: "ok", planLabel: "Ultra", windows: [{ label: "Weekly limit", usedPercent: 40, resetsAt: null }] } };
+  const limited: SnapshotProvider["accounts"][number] = { key: "limited", label: "Limited", weight: 1,
+    usage: { status: "error", message: "quota unavailable" }, lastKnown: { updatedAt: "2026-11-10T00:00:00Z",
+      usage: { status: "ok", planLabel: "Ultra", windows: [{ label: "5-hour limit", usedPercent: 10, resetsAt: null }] } } };
+  const { source } = makeSource({ cached: [{ ...provider([full, limited]), updatedAtMs: 42 }] });
+  const ids = (await list(source)).resources.map(resource => resource.id);
+  assert.ok(ids.includes("pool:claude:claude-weighted-weekly:without-weekly"));
+  const usage = (await get(source, "pool:claude:claude-weighted-weekly", false)).usage;
+  assert.equal(usage.status, "ok");
+  if (usage.status === "ok") assert.equal(usage.windows[0]?.usedPercent, 40);
+});

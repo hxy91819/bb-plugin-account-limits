@@ -140,3 +140,55 @@ test("单供应商刷新只请求该供应商，并保留其余缓存数据", as
   assert.equal(providers.get("cliproxy-claude")?.updatedAt, new Date(now).toISOString());
   assert.equal(providers.get("cliproxy-xai")?.updatedAt, new Date(now - 60_000).toISOString());
 });
+
+test("failed quota reads retain last success and time across retries, but never replace current errors", async () => {
+  const cache = createInMemoryPanelCache();
+  let now = Date.parse("2026-11-10T00:00:00Z");
+  let fail = false;
+  const reader = createPanelSnapshotReader({ cache, now: () => now,
+    listHosts: async () => [{ id: "fictional", name: "Proxy", status: "connected" }],
+    readHost: async () => ({ providers: [{ id: "cliproxy-claude", displayName: "Claude",
+      usage: { status: "ok", planLabel: null, windows: [] }, accounts: [{ key: "a", label: "Account A", weight: 1,
+        usage: fail ? { status: "error", message: "temporary unavailable" } : { status: "ok", planLabel: "Ultra",
+          windows: [{ label: "Weekly limit", usedPercent: 30, resetsAt: "2026-11-11T00:00:00Z" }] } }] }] }),
+  });
+  const account = async () => (await reader({ force: true, ...(fail ? { providerIds: ["cliproxy-claude"] } : {}) })).machines[0]!.providers[0]!.accounts[0]!;
+  assert.equal((await account()).lastKnown, undefined);
+  fail = true; now += 3_600_000;
+  let result = await account();
+  assert.equal(result.usage.status, "error");
+  assert.equal(result.lastKnown?.usage.windows[0]?.usedPercent, 30);
+  assert.equal(result.lastKnown?.updatedAt, "2026-11-10T00:00:00.000Z");
+  now += 48 * 3_600_000;
+  result = await account();
+  assert.equal(result.lastKnown?.updatedAt, "2026-11-10T00:00:00.000Z");
+  assert.equal(result.lastKnown?.usage.windows[0]?.usedPercent, 30);
+  fail = false;
+  assert.equal((await account()).lastKnown, undefined);
+});
+
+test("SQLite history survives cache recreation and targeted refreshes without retaining removed accounts", async () => {
+  const { default: Database } = await import("better-sqlite3");
+  const { createSqlitePanelCache } = await import("./server.js");
+  const db = new Database(":memory:");
+  try {
+    db.exec("CREATE TABLE cliproxy_usage_cache_hosts (host_id TEXT PRIMARY KEY, full_snapshot_updated_at_ms INTEGER NOT NULL); CREATE TABLE cliproxy_usage_cache_providers (host_id TEXT NOT NULL, provider_id TEXT NOT NULL, provider_json TEXT NOT NULL, updated_at_ms INTEGER NOT NULL, PRIMARY KEY (host_id, provider_id))");
+    const cache = createSqlitePanelCache(db);
+    const provider: ProviderSnapshot["providers"][number] = { id: "cliproxy-claude", displayName: "Claude",
+      usage: { status: "ok", planLabel: null, windows: [] }, accounts: [{ key: "a", label: "Account A", weight: 1,
+        usage: { status: "ok", planLabel: "Ultra", windows: [{ label: "Weekly limit", usedPercent: 10, resetsAt: null }] } }] };
+    cache.replaceAll("proxy", [provider], 1000);
+    const failed = { ...provider, accounts: provider.accounts.map(account => ({ ...account,
+      usage: { status: "error" as const, message: "unavailable" } })) };
+    cache.update("proxy", [failed], 2000);
+    const recreated = createSqlitePanelCache(db);
+    recreated.replaceAll("proxy", [failed], 3000);
+    const account = recreated.read("proxy")!.providers[0]!.accounts[0]!;
+    assert.equal(account.usage.status, "error");
+    assert.equal(account.lastKnown?.updatedAt, "1970-01-01T00:00:01.000Z");
+    assert.equal(account.lastKnown?.usage.windows[0]?.usedPercent, 10);
+    recreated.replaceAll("proxy", [{ ...provider, accounts: [] }], 4000);
+    assert.deepEqual(recreated.read("proxy")!.providers[0]!.accounts, []);
+    assert.equal(recreated.read("other-host"), null);
+  } finally { db.close(); }
+});

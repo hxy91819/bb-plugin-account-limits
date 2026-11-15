@@ -44,6 +44,10 @@ const cliproxyAccountUsageSchema = z.object({
   weight: z.number().finite().positive(),
   updatedAt: z.string().datetime().nullable().optional(),
   usage: accountQuotaUsageSchema,
+  lastKnown: z.object({
+    updatedAt: z.string().datetime(),
+    usage: accountQuotaUsageSchema.options[0],
+  }).strict().optional(),
 }).strict();
 
 export type QuotaAccount = z.infer<typeof cliproxyAccountUsageSchema>;

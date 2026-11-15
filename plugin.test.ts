@@ -30,7 +30,7 @@ test("installed plugin with no configured sources is empty through RPC and CLI a
 });
 
 test("standalone source imports only public SDK and package-local modules", async () => {
-  const result = await experimental_scanPublicSdkOnly(process.cwd(), { allow: [/^(react|sonner|jsdom|@testing-library\/react)$/u] });
+  const result = await experimental_scanPublicSdkOnly(process.cwd(), { allow: [/^(react|sonner|jsdom|better-sqlite3|@testing-library\/react)$/u] });
   assert.deepEqual(result.violations, []);
   assert.deepEqual(result.privateDependencies, []);
 });

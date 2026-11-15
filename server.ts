@@ -55,6 +55,21 @@ function cachedProviders(providers: ProviderSnapshot["providers"], updatedAtMs: 
   return providers.map(provider => ({ ...provider, updatedAtMs }));
 }
 
+/** Preserve history per host/provider/account, never substitute it for a current measurement. */
+function retainQuotaHistory(providers: ProviderSnapshot["providers"], previous: CachedProvider[]): ProviderSnapshot["providers"] {
+  return providers.map(provider => {
+    const oldProvider = previous.find(candidate => candidate.id === provider.id);
+    return { ...provider, accounts: provider.accounts.map(account => {
+      if (account.usage.status === "ok") return account;
+      const old = oldProvider?.accounts.find(candidate => candidate.key === account.key);
+      const lastKnown = old?.usage.status === "ok" && old.usage.windows.length
+        ? { usage: old.usage, updatedAt: old.updatedAt ?? new Date(oldProvider!.updatedAtMs).toISOString() }
+        : old?.lastKnown;
+      return { ...account, ...(lastKnown ? { lastKnown } : {}) };
+    }) };
+  });
+}
+
 export function createInMemoryPanelCache(): PanelCache {
   const records = new Map<string, PanelCacheRecord>();
   return {
@@ -64,12 +79,12 @@ export function createInMemoryPanelCache(): PanelCache {
       return { fullSnapshotUpdatedAtMs: record.fullSnapshotUpdatedAtMs, providers: record.providers.map(provider => ({ ...provider })) };
     },
     replaceAll(hostId, providers, updatedAtMs) {
-      records.set(hostId, { fullSnapshotUpdatedAtMs: updatedAtMs, providers: cachedProviders(providers, updatedAtMs) });
+      records.set(hostId, { fullSnapshotUpdatedAtMs: updatedAtMs, providers: cachedProviders(retainQuotaHistory(providers, records.get(hostId)?.providers ?? []), updatedAtMs) });
     },
     update(hostId, providers, updatedAtMs) {
       const record = records.get(hostId) ?? { fullSnapshotUpdatedAtMs: null, providers: [] };
       const byId = new Map(record.providers.map(provider => [provider.id, provider]));
-      for (const provider of cachedProviders(providers, updatedAtMs)) byId.set(provider.id, provider);
+      for (const provider of cachedProviders(retainQuotaHistory(providers, record.providers), updatedAtMs)) byId.set(provider.id, provider);
       records.set(hostId, { ...record, providers: [...byId.values()] });
     },
   };
@@ -102,14 +117,15 @@ export function createSqlitePanelCache(database: SqliteDatabase): PanelCache {
     },
     replaceAll(hostId, providers, updatedAtMs) {
       database.transaction(() => {
+        const retained = retainQuotaHistory(providers, this.read(hostId)?.providers ?? []);
         deleteProviders.run(hostId);
-        for (const provider of providers) writeProvider.run(hostId, provider.id, JSON.stringify(provider), updatedAtMs);
+        for (const provider of retained) writeProvider.run(hostId, provider.id, JSON.stringify(provider), updatedAtMs);
         writeMeta.run(hostId, updatedAtMs);
       })();
     },
     update(hostId, providers, updatedAtMs) {
       database.transaction(() => {
-        for (const provider of providers) writeProvider.run(hostId, provider.id, JSON.stringify(provider), updatedAtMs);
+        for (const provider of retainQuotaHistory(providers, this.read(hostId)?.providers ?? [])) writeProvider.run(hostId, provider.id, JSON.stringify(provider), updatedAtMs);
       })();
     },
   };

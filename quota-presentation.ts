@@ -1,5 +1,5 @@
 import type { AccountLimitsPanelSnapshot, AccountLimitsReadInput, QuotaAccount } from "./contract.js";
-import { aggregateCliproxyPool, groupAccountPools, normalizeCliproxyWindow, type PoolWindow } from "./pool.js";
+import { aggregateCliproxyPool, groupAccountPools, normalizeCliproxyWindow, verifiedAccountPlan, type PoolWindow } from "./pool.js";
 import { buildWeeklyPace, isWeeklyBudget, type WeeklyPace } from "./weekly-pace.js";
 
 /** Pool precedence affects presentation and reminders only; raw observations stay intact. */
@@ -27,7 +27,7 @@ export function visibleQuota(snapshot: AccountLimitsPanelSnapshot | null, hideFa
     const providers = machine.providers.flatMap(provider => {
       if (!provider.accounts.length) return provider.usage.status === "ok" ? [provider] : [];
       const accounts = provider.accounts.filter(account => account.usage.status === "ok");
-      return accounts.length ? [{ ...provider, accounts }] : [];
+      return accounts.length ? [provider] : [];
     });
     return providers.length || machine.providers.length === 0 ? [{ ...machine, providers }] : [];
   }) };
@@ -97,7 +97,7 @@ export function createQuotaUiStore() {
 export type QuotaUiStore = ReturnType<typeof createQuotaUiStore>;
 
 /** Account records and legacy flattened observations share the same pool inputs. */
-function providerAccounts(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number]): readonly QuotaAccount[] {
+export function providerAccounts(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number]): readonly QuotaAccount[] {
   if (provider.accounts.length) return provider.accounts;
   const legacy = new Map<string, QuotaAccount>();
   if (provider.usage.status === "ok") {
@@ -246,6 +246,27 @@ export function quotaTone(usedPercent: number | null, pace?: WeeklyPace | null):
   return "normal";
 }
 
+export function unassignedQuotaFailures(_providerId: string, accounts: readonly QuotaAccount[], queryErrorsOnly = false): number {
+  return accounts.filter(account => account.usage.status !== "ok" && (!queryErrorsOnly || account.usage.status === "error") && !verifiedAccountPlan(account)).length;
+}
+export function incompleteQuotaMessage(reporting: number, total: number, failed: number, unavailable = 0): string {
+  const missing = Math.max(0, total - reporting - failed - unavailable);
+  return [`数据不完整 · ${reporting}/${total} 个账号返回该窗口`,
+    failed > 0 ? `${failed} 个账号查询失败，额度未知；查询失败不代表不能使用` : "",
+    unavailable > 0 ? `${unavailable} 个账号登录或安装状态异常，额度待确认` : "",
+    missing > 0 ? `${missing} 个账号未返回该窗口，额度未知` : ""].filter(Boolean).join("；");
+}
+export function partialPoolPace(failedAccounts = 0): WeeklyPace {
+  return { level: "unknown", label: "数据不完整", reason: "部分账号未返回该窗口，暂不判断整池使用节奏。" + (failedAccounts > 0 ? "额度查询失败不代表账号不能使用。" : ""),
+    expiringAccounts: [], expiringRemainingPercent: 0 };
+}
+export function poolCoverage(accounts: readonly QuotaAccount[], windowId: string): number {
+  const weight = (account: QuotaAccount) => Number.isFinite(account.weight) && account.weight > 0 ? account.weight : 1;
+  const total = accounts.reduce((sum, account) => sum + weight(account), 0);
+  const known = accounts.reduce((sum, account) => sum + (account.usage.status === "ok" && account.usage.windows.some(window =>
+    (window.id ?? normalizeCliproxyWindow(window.label).id) === windowId) ? weight(account) : 0), 0);
+  return total ? 100 * known / total : 0;
+}
 export interface CompactPoolSummary {
   key: string;
   label: string;
@@ -258,29 +279,39 @@ export interface CompactPoolSummary {
   reportingAccounts: number;
   totalAccounts: number;
   missingWeeklyAccounts: number;
+  failedAccounts: number;
+  unavailableAccounts: number;
 }
 
 /** Service cards always describe a pool, independent of the expanded account view. */
-export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number], now: number): CompactPoolSummary[] {
+export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number], now: number, unassignedAccounts = 0, unassignedQueryFailures = 0): CompactPoolSummary[] {
   const accounts = providerAccounts(provider);
   const groups = groupAccountPools(provider.id, accounts);
   return groups.flatMap<CompactPoolSummary>(group => {
     const compatibleGroups = groups.filter(other => other.typeId === group.typeId);
     const typeAccounts = compatibleGroups.flatMap(other => [...other.accounts]);
+    if (!typeAccounts.length) return [];
+    const unassigned = unassignedAccounts + unassignedQuotaFailures(provider.id, accounts.filter(account => !typeAccounts.some(member => member.key === account.key)));
+    const outside = accounts.filter(account => !typeAccounts.some(member => member.key === account.key));
+    const failedAccounts = typeAccounts.filter(account => account.usage.status === "error").length
+      + unassignedQueryFailures + unassignedQuotaFailures(provider.id, outside, true);
+    const unavailableAccounts = typeAccounts.filter(account => account.usage.status !== "ok").length + unassigned - failedAccounts;
     const missingWeekly = compatibleGroups.find(other => other.kind === "without-weekly")?.accounts.length ?? 0;
     const hasReportedWeek = compatibleGroups.some(other => other.kind !== "without-weekly" && other.accounts.some(account =>
       account.usage.status === "ok" && account.usage.windows.some(window => isWeeklyBudget(window.label))));
     if (group.kind === "without-weekly") return hasReportedWeek ? [] : [{ key: group.id, label: "周未报", fullLabel: "总周额度未返回", usedPercent: null,
       detail: `${group.accounts.length} 个账号未返回总周额度，独立统计${group.typeLabel ? ` · ${group.typeLabel}` : ""}`, pace: null, partial: false,
-      reportingAccounts: 0, totalAccounts: typeAccounts.length, missingWeeklyAccounts: missingWeekly }];
+      reportingAccounts: 0, totalAccounts: typeAccounts.length, missingWeeklyAccounts: missingWeekly, unavailableAccounts, failedAccounts }];
     const pool = aggregateCliproxyPool(group.accounts);
-    if (pool.status !== "ok" || !pool.windows.length) return [];
+    if (pool.status !== "ok" || !pool.windows.length) return [{ key: group.id + ":unknown", label: "额度", fullLabel: "池额度未知",
+      usedPercent: null, partial: true, reportingAccounts: 0, totalAccounts: typeAccounts.length + unassigned,
+      missingWeeklyAccounts: missingWeekly, unavailableAccounts, failedAccounts, detail: incompleteQuotaMessage(0, typeAccounts.length + unassigned, failedAccounts, unavailableAccounts), pace: partialPoolPace(failedAccounts) }];
     const weekly = pool.windows.filter(window => isWeeklyBudget(window.label));
     const cursor = pool.windows.filter(window => quotaWindowDisplayLabel(provider.id, window.label) !== undefined);
     const primary = pool.windows.filter(window => quotaWindowPeriod(window.label)?.period !== "5h");
     if (!primary.length) return [{ key: `${group.id}:weekly-unknown`, label: "周未报", fullLabel: "周额度未返回", usedPercent: null,
       detail: `${group.accounts.length} 个账号仅返回 5h 窗口，周额度未知`, pace: null, partial: false,
-      reportingAccounts: 0, totalAccounts: typeAccounts.length, missingWeeklyAccounts: missingWeekly }];
+      reportingAccounts: 0, totalAccounts: typeAccounts.length, missingWeeklyAccounts: missingWeekly, unavailableAccounts, failedAccounts }];
     const tightest = primary.reduce((a, b) => a.usedPercent >= b.usedPercent ? a : b);
     const selected = cursor.length ? cursor : weekly.length ? weekly : [tightest];
     return selected.map((window: PoolWindow) => {
@@ -289,13 +320,14 @@ export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machi
         : window.label === "7d" ? "周" : window.label.replace(/ 7d$/u, "周");
       const fullLabel = cursorLabel ? `池${cursorLabel}` : isWeeklyBudget(window.label) ? `${label === "周" ? "" : label.replace(/周$/u, " ")}池周额度` : `池 ${window.label}`;
       const pace = isWeeklyBudget(window.label) ? buildWeeklyPace(group.accounts, window.id, now, provider.updatedAt) : null;
-      const partial = window.accounts < typeAccounts.length;
+      const partial = window.accounts < typeAccounts.length + unassigned;
       return { key: `${group.id}:${window.id}`, label, fullLabel, usedPercent: window.usedPercent, partial,
         reportingAccounts: window.accounts,
-        totalAccounts: typeAccounts.length,
+        totalAccounts: typeAccounts.length + unassigned,
         missingWeeklyAccounts: isWeeklyBudget(window.label) ? missingWeekly : 0,
-        detail: `${window.accounts} 个账号汇总 · 覆盖 ${window.accounts}/${typeAccounts.length}${group.label ? ` · ${group.label}` : ""}${group.note ? ` · ${group.note}` : ""}${missingWeekly && isWeeklyBudget(window.label) ? ` · ${missingWeekly} 个账号未返回总周额度` : ""}${partial ? " · * 仅统计已返回该窗口的账号，不代表全池额度" : ""}`,
-        pace };
+        failedAccounts, unavailableAccounts,
+        detail: `${window.accounts} 个账号汇总 · 覆盖 ${window.accounts}/${typeAccounts.length + unassigned}${group.label ? ` · ${group.label}` : ""}${group.note ? ` · ${group.note}` : ""}${missingWeekly && isWeeklyBudget(window.label) ? ` · ${missingWeekly} 个账号未返回总周额度` : ""}${partial ? " · * 仅统计已返回该窗口的账号，不代表全池额度" : ""}`,
+        pace: partial ? partialPoolPace(failedAccounts) : pace };
     });
   });
 }

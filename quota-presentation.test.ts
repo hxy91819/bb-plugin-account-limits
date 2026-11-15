@@ -10,12 +10,12 @@ const snapshot = (usedPercent = 85, includeFailure = false): AccountLimitsPanelS
     ...(includeFailure ? [{ key: "failed", label: "Failed", weight: 1, usage: { status: "expired" as const } }] : []),
   ] }] }] });
 
-test("failure hiding filters accounts and failed machines without changing the source snapshot", () => {
+test("failure hiding retains pool membership while hiding failed providers and machines", () => {
   const data = snapshot(85, true);
   data.machines.push({ id: "bad", displayName: "Bad", status: "error", error: "offline", providers: [] });
   const filtered = visibleQuota(data, true)!;
   assert.equal(filtered.machines.length, 1);
-  assert.equal(filtered.machines[0]!.providers[0]!.accounts.length, 1);
+  assert.equal(filtered.machines[0]!.providers[0]!.accounts.length, 2);
   assert.equal(data.machines[0]!.providers[0]!.accounts.length, 2);
   assert.equal(visibleQuota(data, false), data);
 });
@@ -683,4 +683,22 @@ test("account reset order favors weekly budgets, preserves ties and input, and p
     "overdue", "unknown-week", "malformed", "failed", "no-windows",
   ]);
   assert.deepEqual(accounts, before, "Sorting must not change source order or quota observations");
+});
+
+test("identity fallback plan labels cannot shrink a weighted Claude pool when those accounts fail", () => {
+  for (const planLabel of ["Person", "person@example.test", "failed-key"]) {
+    const data = snapshot();
+    const provider = data.machines[0]!.providers[0]!;
+    provider.id = "cliproxy-claude";
+    provider.accounts = [{ key: "good", label: "Good", weight: 1, usage: { status: "ok", planLabel: "Max 5x",
+      windows: [{ label: "Weekly limit", usedPercent: 70, resetsAt: null }] } },
+    { key: "failed-key", label: "Person", weight: 1, usage: { status: "error", message: "quota unavailable" },
+      lastKnown: { updatedAt: "2026-11-10T00:00:00Z", usage: { status: "ok", planLabel,
+        windows: [{ label: "Weekly limit", usedPercent: 0, resetsAt: null }] } } }];
+    const summary = compactPoolSummaries(provider, Date.now()).find(entry => entry.key.includes("claude-weighted-weekly"))!;
+    assert.equal(summary.totalAccounts, 2, planLabel);
+    assert.equal(summary.reportingAccounts, 1);
+    assert.equal(summary.partial, true);
+    assert.equal(summary.pace?.level, "unknown");
+  }
 });
