@@ -928,7 +928,7 @@ test("compact Claude card shows the measurable weighted week with an explicit pa
   t.after(() => { compact.lifecycle.unmount(); resetLegacyPreferences(); });
   const card = await compact.findByRole("button", { name: "Claude" });
   const value = () => card.querySelector(".limits-compact-service-value")?.textContent;
-  assert.equal(value(), "未知 · 2/3");
+  assert.equal(value(), "75%* · 2/3");
   assert.match(card.title, /覆盖 2\/3/u);
   assert.match(within(compact.container).getByRole("note", { name: "" }).textContent!, /数据不完整 · 2\/3 个账号返回该窗口；1 个账号未返回该窗口/u);
   assert.match(card.title, /1 个账号未返回总周额度/u);
@@ -938,7 +938,7 @@ test("compact Claude card shows the measurable weighted week with an explicit pa
   const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
   t.after(() => full.lifecycle.unmount());
   await act(async () => { within(full.container).getByRole("button", { name: "已用（Used）" }).click(); });
-  assert.equal(value(), "未知 · 2/3");
+  assert.equal(value(), "25%* · 2/3");
   provider.accounts = provider.accounts.slice(0, 2);
   await act(async () => { compact.getByRole("button", { name: "刷新精简额度" }).click(); });
   assert.equal(value(), "25%");
@@ -1615,11 +1615,11 @@ test("partial Claude pool keeps failed capacity, marks unknown data and never ad
   const compact = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
   t.after(() => compact.lifecycle.unmount());
   const card = await compact.findByRole("button", { name: "Claude · 周额度加权汇总" });
-  assert.equal(card.querySelector(".limits-compact-service-value")?.textContent, "未知 · 1/2");
+  assert.equal(card.querySelector(".limits-compact-service-value")?.textContent, "5%* · 1/2");
   historical.usage.windows[0]!.resetsAt = new Date(now - 3600_000).toISOString();
   await act(async () => { full.getByRole("button", { name: "刷新全部" }).click(); });
   assert.match(full.container.textContent!, /已过重置时间，额度待更新/u);
-  assert.doesNotMatch(full.container.textContent!, /上次周剩余 90%/u);
+  assert.match(full.container.textContent!, /上次周剩余 90%（非当前额度）/u);
 });
 
 test("pool summary is the default and account details expand below it across both panels without quota requests", async t => {
@@ -1677,13 +1677,13 @@ test("a failed-only tier shows unknown coverage and does not steal the default s
   const slot = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
   t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
   const failed = await slot.findByRole("button", { name: "Codex · Pro" });
-  assert.match(failed.textContent!, /未知 · 0\/1/u);
+  assert.match(failed.textContent!, /未获取 · 0\/1/u);
   assert.equal(slot.getByRole("button", { name: "Codex · Team" }).getAttribute("aria-pressed"), "true");
   assert.ok(slot.container.querySelector(".limits-pools"));
 });
 
 test("historical model-family quota stays labeled and missing healthy windows are not called query failures", async t => {
-  installTestPluginRuntime(); dom.window.localStorage.clear(); dom.window.localStorage.setItem("account-limits.hide-failures", "false");
+  installTestPluginRuntime(); dom.window.localStorage.clear(); dom.window.localStorage.setItem("account-limits.hide-failures", "true");
   const app = await loadPluginApp(() => import("./app.js"));
   const gem = { label: "Gemini Models: Weekly limit", usedPercent: 20, resetsAt: null };
   const cg = { label: "Claude and GPT models: Weekly limit", usedPercent: 80, resetsAt: null };
@@ -1691,14 +1691,16 @@ test("historical model-family quota stays labeled and missing healthy windows ar
   const provider = { id: "cliproxy-antigravity", displayName: "Gemini", updatedAt: null, usage: { status: "ok" as const, planLabel: null, windows: [] },
     accounts: [good("Full", [gem, cg]), good("Gem only", [gem]), { key: "history", label: "History", weight: 1,
       usage: { status: "error" as const, message: "unavailable" }, lastKnown: { updatedAt: "2026-11-10T00:00:00Z",
-        usage: { status: "ok" as const, planLabel: "Google AI Pro", windows: [gem, cg] } } }] };
+        usage: { status: "ok" as const, planLabel: "Google AI Pro", windows: [gem, cg, { label: "Gemini Models: 5-hour limit", usedPercent: 25, resetsAt: null }] } } }] };
   const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "proxy", displayName: "Proxy", source: "cliproxy", status: "connected", error: null, providers: [provider] }] };
   const slot = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc: { readAccountLimits: () => snapshot } });
   t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
   await slot.findByText("Gemini");
   const history = slot.container.querySelector(".limits-unknown-accounts")!;
+  assert.ok((history as HTMLDetailsElement).open);
   assert.match(history.textContent!, /Gem 7d：上次周剩余 80%/u);
   assert.match(history.textContent!, /C\/G 7d：上次周剩余 20%/u);
+  assert.match(history.textContent!, /Gem 5h：上次剩余 75%/u);
   const healthy = slot.getByRole("region", { name: "Google AI Ultra 的池额度" });
   assert.match(healthy.textContent!, /1 个账号未返回该窗口/u);
   assert.doesNotMatch(healthy.textContent!, /查询失败/u);

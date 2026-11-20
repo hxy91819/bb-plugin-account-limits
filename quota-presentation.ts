@@ -26,8 +26,7 @@ export function visibleQuota(snapshot: AccountLimitsPanelSnapshot | null, hideFa
     if (machine.status !== "connected") return [];
     const providers = machine.providers.flatMap(provider => {
       if (!provider.accounts.length) return provider.usage.status === "ok" ? [provider] : [];
-      const accounts = provider.accounts.filter(account => account.usage.status === "ok");
-      return accounts.length ? [provider] : [];
+      return provider.accounts.some(account => account.usage.status === "ok" || account.lastKnown) ? [provider] : [];
     });
     return providers.length || machine.providers.length === 0 ? [{ ...machine, providers }] : [];
   }) };

@@ -354,10 +354,15 @@ function Usage({ providerId, usage, now, mode, updatedAt = null }: { providerId:
 function UnknownAccounts({ accounts, now }: { accounts: readonly PanelProvider["accounts"][number][]; now: number }) {
   const missing = accounts.filter(account => account.usage.status !== "ok");
   if (!missing.length) return null;
-  return <details className="limits-unknown-accounts"><summary>{missing.length} 个账号额度未知 · 查看上次数据</summary>
+  const hasHistory = missing.some(account => account.lastKnown?.usage.windows.length);
+  return <details className="limits-unknown-accounts" open={hasHistory}>
+    <summary>{missing.length} 个账号未获取当前额度{hasHistory && " · 上次数据"}</summary>
     {missing.map(account => <p key={account.key}>{account.label}：{account.usage.status === "error" ? "查询失败，额度未知；查询失败不代表账号不能使用。" : account.usage.status === "expired" ? "登录已过期，需重新登录。" : account.usage.status === "unauthenticated" ? "尚未登录，需登录。" : "所需组件未安装。"}{account.lastKnown
-      ? <>上次成功更新于 {new Date(account.lastKnown.updatedAt).toLocaleString()}；{account.lastKnown.usage.windows.filter(window => isWeeklyBudget(window.label)).map(window =>
-        <span key={window.id ?? normalizeCliproxyWindow(window.label).id}>{normalizeCliproxyWindow(window.label).label}：{window.resetsAt && Date.parse(window.resetsAt) <= now ? "已过重置时间，额度待更新" : `上次周剩余 ${formatQuotaPercent(100 - window.usedPercent, 1)}%（非当前额度）`}</span>)}</>
+      ? <>上次成功更新于 {new Date(account.lastKnown.updatedAt).toLocaleString()}；{account.lastKnown.usage.windows.map(window =>
+        <span key={window.id ?? normalizeCliproxyWindow(window.label).id}>
+          {normalizeCliproxyWindow(window.label).label}：上次{isWeeklyBudget(window.label) ? "周" : ""}剩余 {formatQuotaPercent(100 - window.usedPercent, 1)}%（非当前额度）
+          {window.resetsAt && Date.parse(window.resetsAt) <= now && " · 已过重置时间，额度待更新"}
+        </span>)}</>
       : "暂无成功查询记录"}。</p>)}
   </details>;
 }
@@ -365,7 +370,7 @@ function UnknownAccounts({ accounts, now }: { accounts: readonly PanelProvider["
 function AccountUsage({ provider, now, mode, hideFailures = false }: { provider: PanelProvider; now: number; mode: DisplayMode; hideFailures?: boolean }) {
   if (provider.accounts.length === 0) return <Usage providerId={provider.id} usage={provider.usage} now={now} mode={mode} updatedAt={provider.updatedAt} />;
   return <div className="limits-accounts">
-    {orderAccountsByReset(provider.accounts.filter(account => !hideFailures || account.usage.status === "ok"), now).map((account, index) => <section key={account.key} aria-label={`${account.label} 的额度`}
+    {orderAccountsByReset(provider.accounts.filter(account => !hideFailures || account.usage.status === "ok" || Boolean(account.lastKnown)), now).map((account, index) => <section key={account.key} aria-label={`${account.label} 的额度`}
       className="limits-account">
       <div className="limits-identity">
         <span className="limits-account-index" aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
@@ -604,9 +609,14 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
     {entries.length > 0 && <div className="limits-compact-services" aria-label="额度服务">
       {entries.map(entry => {
         const metrics = compactPoolSummaries(entry.provider, now, entry.unassigned, entry.queryFailures).map(metric => ({ ...metric,
-          percent: metric.partial || metric.usedPercent === null ? null : formatQuotaPercent(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent, 1),
+          percent: metric.usedPercent === null ? null : formatQuotaPercent(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent, 1),
           tone: metric.partial ? "unknown" : quotaTone(metric.usedPercent, metric.pace),
         }));
+        const metricValue = (metric: typeof metrics[number]) => {
+          const value = metric.percent === null ? (metric.partial ? "未获取" : "—") : `${metric.percent}%`;
+          if (!metric.partial) return value;
+          return `${value}${metric.percent === null ? "" : "*"} · ${metric.reportingAccounts}/${metric.totalAccounts}`;
+        };
         const summary = metrics.map(metric => `${metrics.length === 1 ? metric.fullLabel : metric.label}${metric.percent === null ? " —" : `${mode === "used" ? "已用" : "剩余"} ${metric.percent}%${metric.partial ? "*" : ""}`}`).join("，");
         const detail = metrics.map(metric => {
           const advice = metric.pace ? weeklyPaceAdvice(metric.pace) : null;
@@ -615,7 +625,7 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
         return <button type="button" key={entry.key} className="limits-compact-service" data-tone={metrics.length === 1 ? metrics[0]!.tone : "normal"} aria-pressed={entry.key === active?.key}
           aria-label={entry.name}
           title={`${entry.machine.displayName} · ${sourceNames[entry.machine.source ?? "cliproxy"]}${summary ? ` · ${summary}（池汇总，各项分别统计） · ${detail}` : ""}`}
-          onClick={() => setSelected(entry.key)}><span className="limits-compact-service-identity"><span className="limits-compact-service-heading"><ProviderMark id={entry.provider.id} name={entry.provider.displayName} /><span className="limits-compact-service-name">{entry.tier === "套餐未识别" ? "未标套餐" : entry.tier ?? entry.service}</span></span><span className="limits-compact-service-subtitle">{entry.tier ? entry.service : "额度"}</span></span>{metrics.length > 1 ? <span className="limits-compact-service-metrics">{metrics.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label === "C/G周" ? "C/GPT" : metric.label}</span><strong>{metric.partial ? `未知 · ${metric.reportingAccounts}/${metric.totalAccounts}` : metric.percent === null ? "—" : `${metric.percent}%${metric.partial ? "*" : ""}`}</strong></span>)}</span> : <span className="limits-compact-service-value">{metrics[0]?.partial ? `未知 · ${metrics[0].reportingAccounts}/${metrics[0].totalAccounts}` : metrics[0]?.percent === undefined || metrics[0].percent === null ? "—" : `${metrics[0].percent}%${metrics[0].partial ? "*" : ""}`}</span>}</button>;
+          onClick={() => setSelected(entry.key)}><span className="limits-compact-service-identity"><span className="limits-compact-service-heading"><ProviderMark id={entry.provider.id} name={entry.provider.displayName} /><span className="limits-compact-service-name">{entry.tier === "套餐未识别" ? "未标套餐" : entry.tier ?? entry.service}</span></span><span className="limits-compact-service-subtitle">{entry.tier ? entry.service : "额度"}</span></span>{metrics.length > 1 ? <span className="limits-compact-service-metrics">{metrics.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label === "C/G周" ? "C/GPT" : metric.label}</span><strong>{metricValue(metric)}</strong></span>)}</span> : <span className="limits-compact-service-value">{metrics[0] ? metricValue(metrics[0]) : "—"}</span>}</button>;
       })}
     </div>}
     <div className="limits-compact-body">
@@ -627,7 +637,7 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
             {incompleteQuotaMessage(metric.reportingAccounts, metric.totalAccounts, metric.failedAccounts, metric.unavailableAccounts)}
           </p>)}
           <PoolUsage provider={active.provider} now={now} mode={mode} unassigned={active.unassigned} queryFailures={active.queryFailures} />
-          {view === "accounts" && <section className="limits-account-details" aria-label="账号详情"><h3>账号详情</h3>{active.provider.accounts.length ? orderAccountsByReset(active.provider.accounts.filter(account => !hideFailures || account.usage.status === "ok"), now).map(account => <section key={account.key} className="limits-compact-account" aria-label={`${account.label} 的额度`}>
+          {view === "accounts" && <section className="limits-account-details" aria-label="账号详情"><h3>账号详情</h3>{active.provider.accounts.length ? orderAccountsByReset(active.provider.accounts.filter(account => !hideFailures || account.usage.status === "ok" || Boolean(account.lastKnown)), now).map(account => <section key={account.key} className="limits-compact-account" aria-label={`${account.label} 的额度`}>
             <div className="limits-compact-identity"><h3 title={account.label}>{account.label}</h3>{account.usage.status === "ok" && account.usage.planLabel && <span title={account.usage.planLabel}>{account.usage.planLabel}</span>}</div>
             {account.usage.status === "ok" ? account.usage.windows.length ? <QuotaWindows providerId={active.provider.id} windows={accountWindows(account, now, active.provider.updatedAt).map(window => ({ ...window, displayLabel: shortWindowLabel(window.label) === "周" ? "周额度" : undefined }))} now={now} mode={mode} /> : <p className="limits-message">未报告额度窗口。</p>
               : <><UnknownAccounts accounts={[account]} now={now} /><Usage providerId={active.provider.id} usage={account.usage} now={now} mode={mode} /></>}
