@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
-import { definePluginApp, experimental_Icon as BbIcon, useBbNavigate } from "@get-bb/plugin-sdk/app";
+import { definePluginApp, experimental_Icon as BbIcon, experimental_usePluginId, useBbNavigate, useSdk, useSettings } from "@get-bb/plugin-sdk/app";
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
 import { aggregateCliproxyPool, groupAccountPools, groupProviderAccountTypes, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
 import { AntigravityIcon, GrokIcon, ProviderBrandIcon, providerBrand } from "./provider-icons.js";
@@ -439,7 +439,6 @@ function QuotaMark() {
 
 function AccountLimitsPanel({ store }: { store: QuotaUiStore }) {
   const [hideFailures, setHideFailures] = useQuotaPreference("hide-failures");
-  const [reminders, setReminders] = useQuotaPreference("reminders");
   const [mode, changeMode] = useQuotaChoicePreference<DisplayMode>("display-mode", "remaining", ["remaining", "used"]);
   const [view, changeView] = useQuotaChoicePreference<PanelView>("view", "pool", ["accounts", "pool"]);
   const [now, setNow] = useState(Date.now);
@@ -485,7 +484,7 @@ function AccountLimitsPanel({ store }: { store: QuotaUiStore }) {
         </div>
       </div>
       <div className="limits-preferences"><label className="limits-preference"><input type="checkbox" checked={hideFailures} onChange={event => setHideFailures(event.target.checked)} />隐藏获取失败</label>
-      <label className="limits-preference"><input type="checkbox" checked={reminders} onChange={event => setReminders(event.target.checked)} />资源池提醒（已用 80% / 95%）</label></div>
+      <ReminderCheckbox full /></div>
       {providers.length > 0 && <p className="limits-recovery-legend"><span className="limits-recovery-key" aria-hidden="true" />{mode === "used"
         ? "已用部分按预计恢复批次分段，深色较近、浅色较远；斜纹为时间未知或待刷新。"
         : "实色为当前剩余，浅色分段为预计恢复（由近到远）；斜纹为时间未知或待刷新。"}</p>}
@@ -560,7 +559,6 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
   }, [dismiss]);
   const { snapshot: rawSnapshot, error, loading, refresh } = useQuotaData(store);
   const [hideFailures, setHideFailures] = useQuotaPreference("hide-failures");
-  const [reminders, setReminders] = useQuotaPreference("reminders");
   const navigate = useBbNavigate();
   const [mode, setMode] = useQuotaChoicePreference<DisplayMode>("display-mode", "remaining", ["remaining", "used"]);
   const [view, setView] = useQuotaChoicePreference<PanelView>("view", "pool", ["accounts", "pool"]);
@@ -590,7 +588,7 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
         <summary aria-label="额度显示设置" title="显示设置"><PanelIcon name="settings" /></summary>
         <div className="limits-compact-options">
           <label><input type="checkbox" checked={hideFailures} onChange={event => setHideFailures(event.target.checked)} />隐藏失败</label>
-          <label><input type="checkbox" checked={reminders} onChange={event => setReminders(event.target.checked)} />资源池提醒</label>
+          <ReminderCheckbox />
           <span>按池汇总，已用 80% / 95% 时提醒</span>
         </div>
       </details>
@@ -650,9 +648,34 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
   </section>;
 }
 
+function ReminderCheckbox({ full = false }: { full?: boolean }) {
+  const pluginId = experimental_usePluginId();
+  const sdk = useSdk();
+  const { values } = useSettings();
+  const [saving, setSaving] = useState(false);
+
+  async function save(reminders: boolean) {
+    setSaving(true);
+    try {
+      await sdk.plugins.updateSettings({ pluginId, values: { reminders } });
+    } catch {
+      toast.error("无法保存资源池提醒设置");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return <label className={full ? "limits-preference" : undefined}>
+    <input type="checkbox" checked={values?.reminders === true} disabled={!values || saving}
+      onChange={event => void save(event.target.checked)} />
+    {full ? "资源池提醒（已用 80% / 95%）" : "资源池提醒"}
+  </label>;
+}
+
 function QuotaMonitor({ store }: { store: QuotaUiStore }) {
   const { snapshot, refresh } = useQuotaData(store);
-  const [reminders] = useQuotaPreference("reminders");
+  const { values } = useSettings();
+  const reminders = values?.reminders === true;
   const [track] = useState(() => {
     try { return createQuotaAlertTracker(window.localStorage); }
     catch { return createQuotaAlertTracker(); }

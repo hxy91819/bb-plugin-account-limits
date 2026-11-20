@@ -206,6 +206,9 @@ export function registerCliproxyUsageRefreshSchedule(
 }
 
 export default function accountLimitsPlugin(bb: BbPluginApi) {
+  bb.settings.define({
+    reminders: { type: "boolean", label: "资源池提醒（已用 80% / 95%）", default: false },
+  });
   const host = bb.hosts.experimental_client({ contract: accountLimitsHostContract });
   const rawDatabase = bb.storage.database();
   bb.storage.migrate(rawDatabase, [

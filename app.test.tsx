@@ -708,7 +708,7 @@ test("collapsed footer monitoring checks thresholds without duplicate alerts and
   t.mock.method(toast, "warning", (message: unknown) => { warnings.push(String(message)); return 1; });
   const app = await loadPluginApp(() => import("./app.js"));
   let used = 85; let reads = 0;
-  const overlay = renderSlot(app.appOverlays[0]!, {}, { rpc: { readAccountLimits: () => {
+  const overlay = renderSlot(app.appOverlays[0]!, {}, { settings: { reminders: true }, rpc: { readAccountLimits: () => {
     reads++;
     return { machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
       providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
@@ -740,7 +740,7 @@ test("opening a page establishes a quiet baseline even when reminder history is 
   const reenter = async () => {
     overlay?.lifecycle.unmount();
     const app = await loadPluginApp(() => import("./app.js"));
-    overlay = renderSlot(app.appOverlays[0]!, {}, { rpc: { readAccountLimits: () => ({ machines: [{
+    overlay = renderSlot(app.appOverlays[0]!, {}, { settings: { reminders: true }, rpc: { readAccountLimits: () => ({ machines: [{
       id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null,
       providers: [{ id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
         { key: "test", label: "Test account", weight: 1, usage: { status: "ok", planLabel: null, windows: [
@@ -769,9 +769,9 @@ test("opening a page establishes a quiet baseline even when reminder history is 
   await reenter(); assert.equal(warnings.length, 1);
 });
 
-test("reminders disabled at startup do not consume thresholds and the monitor never forces disclosure open", async t => {
+test("legacy browser opt-in cannot enable reminders by default or open the disclosure", async t => {
   installTestPluginRuntime(); resetLegacyPreferences();
-  dom.window.localStorage.setItem("account-limits.reminders", "false");
+  dom.window.localStorage.setItem("account-limits.reminders", "true");
   t.mock.timers.enable({ apis: ["Date", "setInterval"], now: new Date("2026-10-17T00:00:00Z") });
   const { toast } = await import("sonner");
   const warnings: string[] = [];
@@ -783,23 +783,12 @@ test("reminders disabled at startup do not consume thresholds and the monitor ne
       { key: "ok", label: "Healthy", weight: 1, usage: { status: "ok", planLabel: null, windows: [{ label: "Weekly limit", usedPercent: used, resetsAt: null }] } },
     ] }] }] }) } });
   t.after(() => { overlay.lifecycle.unmount(); resetLegacyPreferences(); });
-  const setReminders = async (enabled: boolean) => act(async () => {
-    dom.window.localStorage.setItem("account-limits.reminders", String(enabled));
-    dom.window.dispatchEvent(new dom.window.Event("storage"));
-  });
   await act(async () => { await Promise.resolve(); });
   assert.equal(warnings.length, 0);
   assert.equal(app.experimentalSidebarFooterItems[0]!.runtime.getSnapshot().command, null);
-  await setReminders(true);
-  assert.equal(warnings.length, 0);
-  await setReminders(false);
   used = 96;
   await act(async () => { t.mock.timers.tick(5 * 60_000); await Promise.resolve(); });
   assert.equal(warnings.length, 0);
-  await setReminders(true);
-  assert.equal(warnings.length, 1);
-  await setReminders(false); await setReminders(true);
-  assert.equal(warnings.length, 1);
 });
 
 test("hidden windows pause periodic reads; visibility and focus resume once and are cleaned up", async t => {
@@ -1456,7 +1445,7 @@ test("quota monitor notifies the resource pool independent of account/pool and d
       }],
     }] };
   } };
-  const monitor = renderSlot(app.appOverlays[0]!, {}, { rpc });
+  const monitor = renderSlot(app.appOverlays[0]!, {}, { rpc, settings: { reminders: true } });
   const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
   t.after(() => { monitor.lifecycle.unmount(); full.lifecycle.unmount(); resetLegacyPreferences(); });
   await full.findByText("Codex");
