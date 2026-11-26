@@ -1382,10 +1382,10 @@ test("pool percentages use the whole pool, show decimal precision and count repo
   if (footer.kind !== "disclosure") throw new Error("Missing compact disclosure");
   const compact = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
   t.after(() => compact.lifecycle.unmount());
-  assert.equal((await compact.findByRole("button", { name: "Codex · Pro" })).querySelector(".limits-compact-service-value")!.textContent, "6.3%");
+  assert.equal((await compact.findByRole("button", { name: "Codex" })).querySelector(".limits-compact-service-value")!.textContent, "6.3%");
   await act(async () => { slot.getByRole("button", { name: "剩余" }).click(); });
   assert.ok(within(slot.container).getByText("93.7%"));
-  assert.equal(compact.getByRole("button", { name: "Codex · Pro" }).querySelector(".limits-compact-service-value")!.textContent, "93.7%");
+  assert.equal(compact.getByRole("button", { name: "Codex" }).querySelector(".limits-compact-service-value")!.textContent, "93.7%");
 });
 
 test("5h-only observations stay secondary and explicitly leave weekly quota unknown", async t => {
@@ -1485,7 +1485,7 @@ test("小窗可直接切换模式与视图，保持服务选择、偏好共享�
   const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { rpc });
   t.after(() => { compact.lifecycle.unmount(); full.lifecycle.unmount(); resetLegacyPreferences(); });
   const c = within(compact.container), f = within(full.container);
-  const card = await c.findByRole("button", { name: "Codex · Pro" });
+  const card = await c.findByRole("button", { name: "Codex" });
   await act(async () => { setAccountDetails(c, false); c.getByRole("button", { name: "小窗：已用" }).click(); });
   assert.equal(card.getAttribute("aria-pressed"), "true");
   assert.equal(card.getAttribute("data-tone"), "generous");
@@ -1633,7 +1633,7 @@ test("pool summary is the default and account details expand below it across bot
   const compact = renderSlot(footer, { dismiss() {} }, { rpc });
   t.after(() => compact.lifecycle.unmount());
   const c = within(compact.container);
-  const card = await c.findByRole("button", { name: "Codex · Pro" });
+  const card = await c.findByRole("button", { name: "Codex" });
   const value = card.textContent;
   await act(async () => { setAccountDetails(c, true); });
   for (const root of [full, compact]) {
@@ -1665,9 +1665,9 @@ test("a failed-only tier shows unknown coverage and does not steal the default s
   if (footer.kind !== "disclosure") throw new Error("Missing disclosure");
   const slot = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
   t.after(() => { slot.lifecycle.unmount(); dom.window.localStorage.clear(); });
-  const failed = await slot.findByRole("button", { name: "Codex · Pro" });
+  const failed = await slot.findByRole("button", { name: "Codex" });
   assert.match(failed.textContent!, /未获取 · 0\/1/u);
-  assert.equal(slot.getByRole("button", { name: "Codex · Team" }).getAttribute("aria-pressed"), "true");
+  assert.equal(slot.getByRole("button", { name: "Codex" }).getAttribute("aria-pressed"), "true");
   assert.ok(slot.container.querySelector(".limits-pools"));
 });
 
@@ -1732,4 +1732,35 @@ test("legacy flattened success beats an earlier failed-only card as the compact 
   assert.equal(card.getAttribute("aria-pressed"), "true");
   assert.equal(slot.getByRole("button", { name: "Claude" }).getAttribute("aria-pressed"), "false");
   assert.equal(slot.getByRole("progressbar", { name: "7d 剩余额度" }).getAttribute("aria-valuenow"), "80");
+});
+
+test("Codex compact selector keeps plans in one card and unknown accounts out of both tier denominators", async t => {
+  installTestPluginRuntime(); resetLegacyPreferences();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "pool", source: "account-pool", displayName: "Account Pooler", status: "connected", error: null,
+    providers: [{ id: "account-pool:codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
+      { key: "unknown", label: "Fictional unknown", weight: 1, usage: { status: "error", message: "Offline fixture failure" } },
+      { key: "free", label: "Fictional free", weight: 1, usage: { status: "ok", planLabel: "Free", windows: [{ label: "30 day limit", usedPercent: 100, resetsAt: null }] } },
+      { key: "pro", label: "Fictional pro", weight: 1, usage: { status: "ok", planLabel: "Pro", windows: [{ label: "Weekly limit", usedPercent: 19, resetsAt: null }] } },
+    ] }],
+  }] };
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+  const slot = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
+  const card = await slot.findByRole("button", { name: "Codex" });
+  assert.equal(slot.container.querySelectorAll(".limits-compact-service").length, 1);
+  assert.ok(card.textContent?.includes("Free 30天"));
+  assert.ok(card.textContent?.includes("Pro 周"));
+  assert.ok(card.textContent?.includes("3 个账号 · 1 个未获取"));
+  assert.deepEqual([...card.querySelectorAll("strong")].map(value => value.textContent), ["0%", "81%"]);
+  assert.ok(!card.textContent?.includes("1/2"));
+  assert.ok(!slot.container.querySelector(".limits-compact-body")!.textContent?.includes("1/2"));
+  await act(async () => { slot.getByRole("button", { name: "小窗：已用" }).click(); });
+  assert.deepEqual([...card.querySelectorAll("strong")].map(value => value.textContent), ["100%", "19%"]);
+  await act(async () => { setAccountDetails(slot, true); });
+  assert.equal(slot.container.querySelectorAll(".limits-compact-account").length, 2);
+  await act(async () => { slot.getByRole("checkbox", { name: "隐藏失败" }).click(); });
+  assert.equal(slot.container.querySelectorAll(".limits-compact-account").length, 3);
+  assert.equal(snapshot.machines[0]!.providers[0]!.accounts.length, 3);
 });

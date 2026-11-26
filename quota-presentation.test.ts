@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, formatQuotaPercent, quotaWindowPeriod, quotaAlerts, quotaTone, weeklyPaceAdvice, orderAccountsByReset } from "./quota-presentation.js";
+import { createQuotaAlertTracker, createQuotaUiStore, visibleQuota, compactPoolSummaries, compactServiceSummaries, formatQuotaPercent, quotaWindowPeriod, quotaAlerts, quotaTone, weeklyPaceAdvice, orderAccountsByReset } from "./quota-presentation.js";
 import type { AccountLimitsPanelSnapshot, QuotaAccount } from "./contract.js";
 import type { WeeklyPace } from "./weekly-pace.js";
 
@@ -701,4 +701,17 @@ test("identity fallback plan labels cannot shrink a weighted Claude pool when th
     assert.equal(summary.partial, true);
     assert.equal(summary.pace?.level, "unknown");
   }
+});
+
+
+test("Codex summaries name minute-based monthly windows and retain unknown meaning", () => {
+  const provider = snapshot().machines[0]!.providers[0]!;
+  provider.accounts[0]!.usage = { status: "ok", planLabel: "Free", windows: [{ label: "43200-minute limit", usedPercent: 20, resetsAt: null }] };
+  assert.equal(compactServiceSummaries(provider, Date.now())[0]!.label, "Free 30天");
+  provider.accounts[0]!.usage = { status: "error", message: "fixture unavailable" };
+  provider.accounts[0]!.lastKnown = { updatedAt: "2026-11-01T00:00:00Z", usage: { status: "ok", planLabel: "Pro", windows: [] } };
+  assert.match(compactServiceSummaries(provider, Date.now())[0]!.fullLabel, /池额度未知/u);
+  assert.ok(!compactServiceSummaries(provider, Date.now())[0]!.fullLabel.includes("额度额度"));
+  provider.accounts[0]!.usage = { status: "ok", planLabel: "Pro", windows: [{ label: "5-hour limit", usedPercent: 20, resetsAt: null }] };
+  assert.match(compactServiceSummaries(provider, Date.now())[0]!.fullLabel, /周额度未返回/u);
 });

@@ -2,9 +2,9 @@ import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { toast } from "sonner";
 import { definePluginApp, experimental_Icon as BbIcon, experimental_usePluginId, useBbNavigate, useSdk, useSettings } from "@get-bb/plugin-sdk/app";
 import { accountLimitsPanelRpcContract, type AccountLimitsPanelSnapshot, type QuotaAccount, type ProviderSnapshot, type QuotaSourceId } from "./contract.js";
-import { aggregateCliproxyPool, groupAccountPools, groupProviderAccountTypes, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
+import { aggregateCliproxyPool, groupAccountPools, normalizeCliproxyWindow, orderQuotaWindows, type PoolWindow } from "./pool.js";
 import { AntigravityIcon, GrokIcon, ProviderBrandIcon, providerBrand } from "./provider-icons.js";
-import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactPoolSummaries, orderAccountsByReset, quotaTone, weeklyPaceAdvice, formatQuotaPercent, quotaWindowDisplayLabel, quotaWindowPeriod, poolCoverage, partialPoolPace, unassignedQuotaFailures, incompleteQuotaMessage, providerAccounts, type QuotaUiStore } from "./quota-presentation.js";
+import { createQuotaUiStore, createQuotaAlertTracker, visibleQuota, compactServiceSummaries, compactServiceTypes, compactCodexPoolTypes, isCodexQuotaProvider, orderAccountsByReset, quotaTone, weeklyPaceAdvice, formatQuotaPercent, quotaWindowDisplayLabel, quotaWindowPeriod, poolCoverage, partialPoolPace, unassignedQuotaFailures, incompleteQuotaMessage, providerAccounts, type QuotaUiStore } from "./quota-presentation.js";
 import { useQuotaData, useQuotaPreference, useQuotaChoicePreference } from "./quota-ui.js";
 import { panelStyles } from "./panel-styles.js";
 import { buildPoolRecovery, type PoolRecovery } from "./pool-recovery.js";
@@ -567,7 +567,7 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(timer); }, []);
   const snapshot = visibleQuota(rawSnapshot, hideFailures);
   const entries = snapshot?.machines.flatMap(machine => machine.providers.flatMap(provider =>
-    groupProviderAccountTypes(provider.id, provider.accounts).map(type => ({
+    compactServiceTypes(provider).map(type => ({
       key: JSON.stringify([machine.source, machine.id, provider.id, type.id]), machine,
       provider: { ...provider, accounts: [...type.accounts] },
       tier: type.label?.replace(/^Google AI /iu, "") ?? null,
@@ -578,7 +578,7 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
       unassigned: unassignedQuotaFailures(provider.id, provider.accounts.filter(account => !type.accounts.some(member => member.key === account.key))),
     })))) ?? [];
   const active = entries.find(entry => entry.key === selected) ?? entries.find(entry => providerAccounts(entry.provider).some(account => account.usage.status === "ok")) ?? entries[0];
-  const activeMetrics = active ? compactPoolSummaries(active.provider, now, active.unassigned, active.queryFailures) : [];
+  const activeMetrics = active ? compactServiceSummaries(active.provider, now, active.unassigned, active.queryFailures) : [];
   return <section ref={panelRef} className="limits-panel limits-compact" aria-label="账户额度精简版">
     <style>{panelStyles}</style>
     <header className="limits-compact-head">
@@ -606,7 +606,9 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
     </div>
     {entries.length > 0 && <div className="limits-compact-services" aria-label="额度服务">
       {entries.map(entry => {
-        const metrics = compactPoolSummaries(entry.provider, now, entry.unassigned, entry.queryFailures).map(metric => ({ ...metric,
+        const codex = isCodexQuotaProvider(entry.provider.id);
+        const unknown = codex ? unassignedQuotaFailures(entry.provider.id, providerAccounts(entry.provider)) : 0;
+        const metrics = compactServiceSummaries(entry.provider, now, entry.unassigned, entry.queryFailures).map(metric => ({ ...metric,
           percent: metric.usedPercent === null ? null : formatQuotaPercent(mode === "used" ? metric.usedPercent : 100 - metric.usedPercent, 1),
           tone: metric.partial ? "unknown" : quotaTone(metric.usedPercent, metric.pace),
         }));
@@ -620,10 +622,10 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
           const advice = metric.pace ? weeklyPaceAdvice(metric.pace) : null;
           return `${metric.fullLabel}${advice ? ` · ${advice.label}${advice.prioritize ? `（${advice.reason}）` : ""}` : ""} · ${metric.detail}`;
         }).join("；");
-        return <button type="button" key={entry.key} className="limits-compact-service" data-tone={metrics.length === 1 ? metrics[0]!.tone : "normal"} aria-pressed={entry.key === active?.key}
+        return <button type="button" key={entry.key} className="limits-compact-service" data-overview={codex || undefined} data-tone={metrics.length === 1 ? metrics[0]!.tone : "normal"} aria-pressed={entry.key === active?.key}
           aria-label={entry.name}
-          title={`${entry.machine.displayName} · ${sourceNames[entry.machine.source ?? "cliproxy"]}${summary ? ` · ${summary}（池汇总，各项分别统计） · ${detail}` : ""}`}
-          onClick={() => setSelected(entry.key)}><span className="limits-compact-service-identity"><span className="limits-compact-service-heading"><ProviderMark id={entry.provider.id} name={entry.provider.displayName} /><span className="limits-compact-service-name">{entry.tier === "套餐未识别" ? "未标套餐" : entry.tier ?? entry.service}</span></span><span className="limits-compact-service-subtitle">{entry.tier ? entry.service : "额度"}</span></span>{metrics.length > 1 ? <span className="limits-compact-service-metrics">{metrics.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label === "C/G周" ? "C/GPT" : metric.label}</span><strong>{metricValue(metric)}</strong></span>)}</span> : <span className="limits-compact-service-value">{metrics[0] ? metricValue(metrics[0]) : "—"}</span>}</button>;
+          title={`${entry.machine.displayName} · ${sourceNames[entry.machine.source ?? "cliproxy"]}${unknown ? ` · ${unknown} 个账号额度未获取，套餐未知，不分摊到已知套餐` : ""}${summary ? ` · ${summary}（池汇总，各项分别统计） · ${detail}` : ""}`}
+          onClick={() => setSelected(entry.key)}><span className="limits-compact-service-identity"><span className="limits-compact-service-heading"><ProviderMark id={entry.provider.id} name={entry.provider.displayName} /><span className="limits-compact-service-name">{entry.tier === "套餐未识别" ? "未标套餐" : entry.tier ?? entry.service}</span></span><span className="limits-compact-service-subtitle">{codex ? `${providerAccounts(entry.provider).length} 个账号${unknown ? ` · ${unknown} 个未获取` : ""}` : entry.tier ? entry.service : "额度"}</span></span>{metrics.length > 1 || codex ? <span className="limits-compact-service-metrics">{metrics.map(metric => <span key={metric.key} className="limits-compact-service-metric" data-tone={metric.tone}><span>{metric.label === "C/G周" ? "C/GPT" : metric.label}</span><strong className={metrics.length === 1 ? "limits-compact-service-value" : undefined}>{metricValue(metric)}</strong></span>)}</span> : <span className="limits-compact-service-value">{metrics[0] ? metricValue(metrics[0]) : "—"}</span>}</button>;
       })}
     </div>}
     <div className="limits-compact-body">
@@ -634,7 +636,13 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
           {activeMetrics.filter(metric => metric.partial).map(metric => <p key={metric.key} className="limits-partial-note" role="note">
             {incompleteQuotaMessage(metric.reportingAccounts, metric.totalAccounts, metric.failedAccounts, metric.unavailableAccounts)}
           </p>)}
-          <PoolUsage provider={active.provider} now={now} mode={mode} unassigned={active.unassigned} queryFailures={active.queryFailures} />
+          {isCodexQuotaProvider(active.provider.id) ? <>
+            {unassignedQuotaFailures(active.provider.id, providerAccounts(active.provider)) > 0 && <p className="limits-partial-note" role="note">
+              {unassignedQuotaFailures(active.provider.id, providerAccounts(active.provider))} 个账号额度未获取，套餐未知，单独保留，不计入已知套餐汇总。
+            </p>}
+            {compactCodexPoolTypes(active.provider).map(type => <PoolUsage key={type.id}
+              provider={{ ...active.provider, accounts: [...type.accounts] }} now={now} mode={mode} />)}
+          </> : <PoolUsage provider={active.provider} now={now} mode={mode} unassigned={active.unassigned} queryFailures={active.queryFailures} />}
           {view === "accounts" && <section className="limits-account-details" aria-label="账号详情"><h3>账号详情</h3>{active.provider.accounts.length ? orderAccountsByReset(active.provider.accounts.filter(account => !hideFailures || account.usage.status === "ok" || Boolean(account.lastKnown)), now).map(account => <section key={account.key} className="limits-compact-account" aria-label={`${account.label} 的额度`}>
             <div className="limits-compact-identity"><h3 title={account.label}>{account.label}</h3>{account.usage.status === "ok" && account.usage.planLabel && <span title={account.usage.planLabel}>{account.usage.planLabel}</span>}</div>
             {account.usage.status === "ok" ? account.usage.windows.length ? <QuotaWindows providerId={active.provider.id} windows={accountWindows(account, now, active.provider.updatedAt).map(window => ({ ...window, displayLabel: shortWindowLabel(window.label) === "周" ? "周额度" : undefined }))} now={now} mode={mode} /> : <p className="limits-message">未报告额度窗口。</p>

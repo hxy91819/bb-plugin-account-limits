@@ -233,6 +233,7 @@ export const panelStyles = `
 .limits-compact .limits-compact-service-subtitle { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; line-height: 15px; opacity: .8; }
 .limits-compact .limits-compact-service-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; line-height: 15px; }
 .limits-compact .limits-compact-service-value { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 1px; font-size: 13px; font-weight: 600; line-height: 17px; font-variant-numeric: tabular-nums; }
+.limits-compact .limits-compact-service[data-overview] { grid-column: 1 / -1; }
 .limits-compact .limits-compact-service-metrics { display: flex; justify-content: center; gap: 7px; min-width: 0; }
 .limits-compact .limits-compact-service-metric { display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; font-size: 10px; line-height: 13px; white-space: nowrap; }
 .limits-compact .limits-compact-service-metric strong { padding-bottom: 1px; font-size: 11px; line-height: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }

@@ -1,5 +1,5 @@
 import type { AccountLimitsPanelSnapshot, AccountLimitsReadInput, QuotaAccount } from "./contract.js";
-import { aggregateCliproxyPool, groupAccountPools, normalizeCliproxyWindow, verifiedAccountPlan, type PoolWindow } from "./pool.js";
+import { aggregateCliproxyPool, groupAccountPools, groupProviderAccountTypes, normalizeCliproxyWindow, verifiedAccountPlan, type PoolWindow } from "./pool.js";
 import { buildWeeklyPace, isWeeklyBudget, type WeeklyPace } from "./weekly-pace.js";
 
 /** Pool precedence affects presentation and reminders only; raw observations stay intact. */
@@ -329,4 +329,35 @@ export function compactPoolSummaries(provider: AccountLimitsPanelSnapshot["machi
         pace: partial ? partialPoolPace(failedAccounts) : pace };
     });
   });
+}
+
+
+/** One selector per Codex source; tiers remain independent metrics within it. */
+export function isCodexQuotaProvider(id: string): boolean {
+  return id === "codex" || id.startsWith("codex-") || id === "cliproxy-codex" || id === "account-pool:codex";
+}
+export function compactServiceTypes(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number]) {
+  return isCodexQuotaProvider(provider.id)
+    ? [{ id: "codex-overview", label: null, accounts: provider.accounts, note: undefined as string | undefined }]
+    : groupProviderAccountTypes(provider.id, provider.accounts);
+}
+export function compactServiceSummaries(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number], now: number, unassigned = 0, queryFailures = 0): CompactPoolSummary[] {
+  if (!isCodexQuotaProvider(provider.id)) return compactPoolSummaries(provider, now, unassigned, queryFailures);
+  const measured = compactCodexPoolTypes(provider);
+  if (!measured.length) return compactPoolSummaries(provider, now);
+  return measured.flatMap(group => compactPoolSummaries({ ...provider, accounts: [...group.accounts] }, now).map(metric => {
+    const minutes = /^(\d+)m$/u.exec(metric.label);
+    const days = minutes ? Number(minutes[1]) / 1440 : 0;
+    const period = /^(?:30d|30 day limit)$/iu.test(metric.label) ? "30天"
+      : days >= 1 && Number.isInteger(days) ? `${days}天`
+      : metric.fullLabel === "池额度未知" ? "额度未知" : metric.label;
+    const label = `${group.label ?? "未标套餐"} ${period}`;
+    return { ...metric, label, fullLabel: metric.usedPercent === null ? `${group.label ?? "未标套餐"} · ${metric.fullLabel}` : `${group.label ?? "未标套餐"}池${period}额度`, detail: `${label} · ${metric.detail}` };
+  }));
+}
+
+/** Keep unknown-plan failures separate in the compact card and its pool body. */
+export function compactCodexPoolTypes(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number]) {
+  return groupProviderAccountTypes(provider.id, providerAccounts(provider)).filter(group =>
+    group.accounts.some(account => verifiedAccountPlan(account) || account.usage.status === "ok"));
 }
