@@ -207,6 +207,7 @@ export function registerCliproxyUsageRefreshSchedule(
 
 export default function accountLimitsPlugin(bb: BbPluginApi) {
   bb.settings.define({
+    hideFreeAccounts: { type: "boolean", label: "隐藏 Free 账号", default: false },
     reminders: { type: "boolean", label: "资源池提醒（已用 80% / 95%）", default: false },
   });
   const host = bb.hosts.experimental_client({ contract: accountLimitsHostContract });

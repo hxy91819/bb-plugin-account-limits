@@ -447,7 +447,8 @@ function AccountLimitsPanel({ store }: { store: QuotaUiStore }) {
     return () => clearInterval(timer);
   }, []);
   const { snapshot: rawSnapshot, error, loading, refresh } = useQuotaData(store);
-  const snapshot = visibleQuota(rawSnapshot, hideFailures);
+  const { values: displaySettings } = useSettings();
+  const snapshot = visibleQuota(rawSnapshot, hideFailures, displaySettings?.hideFreeAccounts === true);
   const load = (force = false) => refresh(force ? { force: true } : {});
   const refreshProvider = (providerId: string, source: QuotaSourceId) => refresh({ source, providerIds: [providerId], force: true });
 
@@ -565,7 +566,8 @@ function CompactQuota({ store, dismiss }: { store: QuotaUiStore; dismiss(): void
   const [selected, setSelected] = useState("");
   const [now, setNow] = useState(Date.now);
   useEffect(() => { const timer = setInterval(() => setNow(Date.now()), 60_000); return () => clearInterval(timer); }, []);
-  const snapshot = visibleQuota(rawSnapshot, hideFailures);
+  const { values: displaySettings } = useSettings();
+  const snapshot = visibleQuota(rawSnapshot, hideFailures, displaySettings?.hideFreeAccounts === true);
   const entries = snapshot?.machines.flatMap(machine => machine.providers.flatMap(provider =>
     compactServiceTypes(provider).map(type => ({
       key: JSON.stringify([machine.source, machine.id, provider.id, type.id]), machine,
@@ -690,9 +692,9 @@ function QuotaMonitor({ store }: { store: QuotaUiStore }) {
   });
   useEffect(() => {
     if (!snapshot || !reminders) return;
-    const alerts = track(snapshot);
+    const alerts = track(visibleQuota(snapshot, false, values?.hideFreeAccounts === true)!);
     for (const alert of alerts) toast.warning(alert.title, { id: `account-limits:${alert.key}`, duration: 8_000, position: "top-right" });
-  }, [snapshot, reminders, track]);
+  }, [snapshot, reminders, track, values?.hideFreeAccounts]);
   useEffect(() => {
     let lastRead = Date.now();
     let disposed = false;

@@ -18,9 +18,9 @@ function preferCodexPool(snapshot: AccountLimitsPanelSnapshot): AccountLimitsPan
 }
 
 /** Filtering is presentation-only: failed records remain in the underlying snapshot. */
-export function visibleQuota(snapshot: AccountLimitsPanelSnapshot | null, hideFailures: boolean): AccountLimitsPanelSnapshot | null {
+export function visibleQuota(snapshot: AccountLimitsPanelSnapshot | null, hideFailures: boolean, hideFreeAccounts = false): AccountLimitsPanelSnapshot | null {
   if (!snapshot) return snapshot;
-  const preferred = preferCodexPool(snapshot);
+  const preferred = preferCodexPool(hideFreeAccounts ? withoutFreeAccounts(snapshot) : snapshot);
   if (!hideFailures) return preferred;
   return { machines: preferred.machines.flatMap(machine => {
     if (machine.status !== "connected") return [];
@@ -360,4 +360,24 @@ export function compactServiceSummaries(provider: AccountLimitsPanelSnapshot["ma
 export function compactCodexPoolTypes(provider: AccountLimitsPanelSnapshot["machines"][number]["providers"][number]) {
   return groupProviderAccountTypes(provider.id, providerAccounts(provider)).filter(group =>
     group.accounts.some(account => verifiedAccountPlan(account) || account.usage.status === "ok"));
+}
+
+/** Presentation preference only; source accounts and public resources stay intact. */
+function withoutFreeAccounts(snapshot: AccountLimitsPanelSnapshot): AccountLimitsPanelSnapshot {
+  return { machines: snapshot.machines.flatMap(machine => {
+    const providers = machine.providers.flatMap(provider => {
+      const accounts = providerAccounts(provider);
+      const kept = accounts.filter(account => verifiedAccountPlan(account)?.toLowerCase() !== "free");
+      if (kept.length === accounts.length) return [provider];
+      if (!kept.length) return [];
+      const healthy = kept.filter(account => account.usage.status === "ok");
+      const usage: typeof provider.usage = healthy.length ? {
+        status: "ok", planLabel: `${healthy.length}/${kept.length} accounts`,
+        windows: healthy.flatMap(account => account.usage.status === "ok"
+          ? account.usage.windows.map(window => ({ ...window, accountLabel: account.label })) : []),
+      } : { status: "error", message: "保留账号的额度尚未获取。" };
+      return [{ ...provider, accounts: kept, usage }];
+    });
+    return providers.length || !machine.providers.length ? [{ ...machine, providers }] : [];
+  }) };
 }

@@ -715,3 +715,29 @@ test("Codex summaries name minute-based monthly windows and retain unknown meani
   provider.accounts[0]!.usage = { status: "ok", planLabel: "Pro", windows: [{ label: "5-hour limit", usedPercent: 20, resetsAt: null }] };
   assert.match(compactServiceSummaries(provider, Date.now())[0]!.fullLabel, /周额度未返回/u);
 });
+
+
+test("Free filtering excludes confirmed and historical Free accounts while retaining unknown and paid accounts", () => {
+  const original = snapshot(60, true);
+  const provider = original.machines[0]!.providers[0]!;
+  if (provider.accounts[0]!.usage.status !== "ok") throw new Error("fixture");
+  provider.accounts[0]!.usage.planLabel = "Free";
+  provider.accounts[1]!.lastKnown = { updatedAt: "2026-11-01T00:00:00Z", usage: { status: "ok", planLabel: "Free", windows: [] } };
+  provider.accounts.push({ key: "paid", label: "Fictional paid", weight: 1, usage: { status: "ok", planLabel: "Pro", windows: [{ label: "Weekly limit", usedPercent: 40, resetsAt: null }] } },
+    { key: "unknown", label: "Fictional unknown", weight: 1, usage: { status: "error", message: "fixture unavailable" } });
+  provider.usage = { status: "ok", planLabel: "2/4 accounts", windows: [{ label: "Weekly limit", accountLabel: "Healthy", usedPercent: 60, resetsAt: null }] };
+  const filtered = visibleQuota(original, false, true)!;
+  assert.deepEqual(filtered.machines[0]!.providers[0]!.accounts.map(account => account.key), ["paid", "unknown"]);
+  const usage = filtered.machines[0]!.providers[0]!.usage;
+  assert.equal(usage.status, "ok");
+  if (usage.status === "ok") {
+    assert.equal(usage.planLabel, "1/2 accounts");
+    assert.deepEqual(usage.windows.map(window => window.accountLabel), ["Fictional paid"]);
+  }
+  assert.equal(original.machines[0]!.providers[0]!.accounts.length, 4);
+  assert.equal(provider.usage.status === "ok" && provider.usage.planLabel, "2/4 accounts");
+  const legacy = snapshot();
+  legacy.machines[0]!.providers[0]!.accounts = [];
+  legacy.machines[0]!.providers[0]!.usage = { status: "ok", planLabel: "Free", windows: [{ label: "Weekly limit", accountLabel: "Fictional legacy", usedPercent: 60, resetsAt: null }] };
+  assert.equal(visibleQuota(legacy, false, true)!.machines.length, 0);
+});

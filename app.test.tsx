@@ -1762,5 +1762,17 @@ test("Codex compact selector keeps plans in one card and unknown accounts out of
   assert.equal(slot.container.querySelectorAll(".limits-compact-account").length, 2);
   await act(async () => { slot.getByRole("checkbox", { name: "隐藏失败" }).click(); });
   assert.equal(slot.container.querySelectorAll(".limits-compact-account").length, 3);
+  if (snapshot.machines[0]!.providers[0]!.usage.status === "ok") snapshot.machines[0]!.providers[0]!.usage.planLabel = "2/3 accounts";
+  const filtered = renderSlot(footer, { dismiss() {} }, { settings: { hideFreeAccounts: true }, rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => filtered.lifecycle.unmount());
+  const paidCard = await within(filtered.container).findByRole("button", { name: "Codex" });
+  assert.ok(!paidCard.textContent?.includes("Free"));
+  assert.ok(paidCard.textContent?.includes("2 个账号 · 1 个未获取"));
+  assert.ok(!filtered.container.textContent?.includes("Fictional free"));
+  const full = renderSlot(app.navPanels[0]!, { subPath: "" }, { settings: { hideFreeAccounts: true }, rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => full.lifecycle.unmount());
+  await within(full.container).findByText("Codex");
+  assert.ok(!full.container.textContent?.includes("Fictional free"));
+  assert.equal(full.container.querySelector(".limits-provider-count")?.textContent, "1/2");
   assert.equal(snapshot.machines[0]!.providers[0]!.accounts.length, 3);
 });
