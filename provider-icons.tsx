@@ -42,9 +42,10 @@ export function AntigravityIcon({ className }: IconProps) {
 }
 
 /** Service identity only; model-family and quota grouping remain independent. */
-export function providerBrand(id: string): keyof typeof providerBrandAssets | "grok" | null {
+export function providerBrand(id: string, name = ""): keyof typeof providerBrandAssets | "grok" | null {
   const key = id.toLowerCase();
-  if (key.includes("antigravity")) return "antigravity";
+  const label = name.toLowerCase();
+  if (key.includes("antigravity") || /(?:^|[-_:])agy(?:$|[-_:])/u.test(key) || label.includes("antigravity")) return "antigravity";
   if (key.includes("claude")) return "claude";
   if (key.includes("codex") || key === "openai") return "openai";
   if (key.includes("cursor")) return "cursor";

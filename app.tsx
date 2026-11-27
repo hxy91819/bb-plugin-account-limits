@@ -128,7 +128,7 @@ function PanelIcon({ name, spinning = false }: { name: "refresh" | "accounts" | 
 }
 
 function ProviderMark({ id, name }: { id: string; name: string }) {
-  const brand = providerBrand(id);
+  const brand = providerBrand(id, name);
   if (brand) return <ProviderBrandIcon brand={brand} className="limits-mark-icon" />;
   return <span className="limits-mark-letter" aria-hidden="true">{id.includes("codex") ? "⌘" : name.slice(0, 1).toUpperCase()}</span>;
 }

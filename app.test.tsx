@@ -1808,4 +1808,13 @@ test("compact service cards only span full width when their metrics need overvie
   const codexLCard = within(singleSlot.container).getByRole("button", { name: "Codex · L" });
   assert.equal(codexCard.hasAttribute("data-overview"), false);
   assert.equal(codexLCard.hasAttribute("data-overview"), false);
+  singleSlot.lifecycle.unmount();
+
+  const agySnapshot: AccountLimitsPanelSnapshot = { machines: [{ id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null, providers: [
+    { id: "acp-agy", displayName: "Antigravity (AGY)", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [{ accountLabel: null, label: "Weekly limit", usedPercent: 17, resetsAt: null }] }, accounts: [] },
+  ] }] };
+  const agySlot = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => agySnapshot } });
+  t.after(() => agySlot.lifecycle.unmount());
+  const agyCard = await within(agySlot.container).findByRole("button", { name: "Antigravity (AGY)" });
+  assert.ok(agyCard.querySelector('img[data-provider-brand="antigravity"]'));
 });
