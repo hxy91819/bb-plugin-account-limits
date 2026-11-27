@@ -1776,3 +1776,36 @@ test("Codex compact selector keeps plans in one card and unknown accounts out of
   assert.equal(full.container.querySelector(".limits-provider-count")?.textContent, "1/2");
   assert.equal(snapshot.machines[0]!.providers[0]!.accounts.length, 3);
 });
+
+test("compact service cards only span full width when their metrics need overview space", async t => {
+  installTestPluginRuntime(); resetLegacyPreferences();
+  const app = await loadPluginApp(() => import("./app.js"));
+  const snapshot: AccountLimitsPanelSnapshot = { machines: [
+    { id: "local", source: "bb-providers", displayName: "Local", status: "connected", error: null, providers: [
+      { id: "codex", displayName: "Codex", updatedAt: null, usage: { status: "ok", planLabel: "Pro", windows: [{ accountLabel: null, label: "Weekly limit", usedPercent: 75, resetsAt: null }] }, accounts: [] },
+      { id: "codex-l", displayName: "Codex · L", updatedAt: null, usage: { status: "ok", planLabel: "Pro", windows: [{ accountLabel: null, label: "Weekly limit", usedPercent: 0, resetsAt: null }] }, accounts: [] },
+    ] },
+    { id: "pool", source: "account-pool", displayName: "Account Pooler", status: "connected", error: null, providers: [
+      { id: "account-pool:codex", displayName: "Codex Pool", updatedAt: null, usage: { status: "ok", planLabel: null, windows: [] }, accounts: [
+        { key: "free", label: "Fictional free", weight: 1, usage: { status: "ok", planLabel: "Free", windows: [{ label: "30 day limit", usedPercent: 20, resetsAt: null }] } },
+        { key: "pro", label: "Fictional pro", weight: 1, usage: { status: "ok", planLabel: "Pro", windows: [{ label: "Weekly limit", usedPercent: 40, resetsAt: null }] } },
+        { key: "team", label: "Fictional team", weight: 1, usage: { status: "ok", planLabel: "Team", windows: [{ label: "Weekly limit", usedPercent: 60, resetsAt: null }] } },
+      ] },
+    ] },
+  ] };
+  const footer = app.experimentalSidebarFooterItems[0]!;
+  if (footer.kind !== "disclosure") throw new Error("Missing compact panel");
+  const slot = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => snapshot } });
+  t.after(() => { slot.lifecycle.unmount(); resetLegacyPreferences(); });
+  const multiTier = await slot.findByRole("button", { name: "Codex Pool" });
+  assert.equal(multiTier.hasAttribute("data-overview"), true);
+  slot.lifecycle.unmount();
+
+  const singleHomeSnapshot: AccountLimitsPanelSnapshot = { machines: [snapshot.machines[0]!] };
+  const singleSlot = renderSlot(footer, { dismiss() {} }, { rpc: { readAccountLimits: () => singleHomeSnapshot } });
+  t.after(() => singleSlot.lifecycle.unmount());
+  const codexCard = await within(singleSlot.container).findByRole("button", { name: "Codex" });
+  const codexLCard = within(singleSlot.container).getByRole("button", { name: "Codex · L" });
+  assert.equal(codexCard.hasAttribute("data-overview"), false);
+  assert.equal(codexLCard.hasAttribute("data-overview"), false);
+});

@@ -225,7 +225,7 @@ export const panelStyles = `
 .limits-compact .limits-explanation-copy { font-size: 10px; }
 .limits-compact .limits-pool-count { font-size: 10px; }
 .limits-compact .limits-compact-services { display: grid; grid-template-columns: repeat(auto-fit, minmax(108px, 1fr)); gap: 3px; padding: 3px; margin: 0 10px 12px; border-radius: 8px; background: var(--sidebar-accent, var(--muted)); }
-.limits-compact .limits-compact-service { display: grid; grid-template-rows: 30px 32px; justify-items: stretch; align-content: center; gap: 2px; min-width: 0; min-height: 82px; padding: 7px 6px; border: 1px solid transparent; border-radius: 6px; font: inherit; text-align: center; background: transparent; color: var(--muted-foreground); }
+.limits-compact .limits-compact-service { display: grid; grid-template-rows: 30px minmax(32px, auto); justify-items: stretch; align-content: center; gap: 2px; min-width: 0; min-height: 82px; padding: 7px 6px; border: 1px solid transparent; border-radius: 6px; font: inherit; text-align: center; background: transparent; color: var(--muted-foreground); }
 .limits-compact .limits-compact-service-heading { display: flex; align-items: center; justify-content: center; gap: 5px; min-width: 0; }
 .limits-compact .limits-compact-service-heading .limits-mark-icon { display: block; width: 14px; height: 14px; flex: none; object-fit: contain; }
 .limits-compact .limits-compact-service-heading .limits-mark-letter { width: 14px; font-size: 12px; line-height: 14px; }
@@ -234,7 +234,7 @@ export const panelStyles = `
 .limits-compact .limits-compact-service-name { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; font-size: 10px; line-height: 15px; }
 .limits-compact .limits-compact-service-value { display: flex; align-items: flex-end; justify-content: center; padding-bottom: 1px; font-size: 13px; font-weight: 600; line-height: 17px; font-variant-numeric: tabular-nums; }
 .limits-compact .limits-compact-service[data-overview] { grid-column: 1 / -1; }
-.limits-compact .limits-compact-service-metrics { display: flex; justify-content: center; gap: 7px; min-width: 0; }
+.limits-compact .limits-compact-service-metrics { display: flex; flex-wrap: wrap; justify-content: center; gap: 4px 7px; min-width: 0; }
 .limits-compact .limits-compact-service-metric { display: flex; flex-direction: column; align-items: center; justify-content: space-between; min-width: 0; font-size: 10px; line-height: 13px; white-space: nowrap; }
 .limits-compact .limits-compact-service-metric strong { padding-bottom: 1px; font-size: 11px; line-height: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
 .limits-compact .limits-compact-service[aria-pressed=true] { color: var(--foreground); background: var(--background); border-color: var(--border); box-shadow: 0 1px 2px color-mix(in srgb, var(--foreground) 4%, transparent); }
